@@ -1,0 +1,201 @@
+SKU_ID,Category,Sub_Category,Machine_Compatibility,Shelf_Life_Days,Unit_Volume_m3,Criticality_Score
+SP-FIL-0001,Spare Parts,Filters,"Diesel Engine, Power Tiller",,0.0093,4
+SP-PIS-0002,Spare Parts,Piston Kits,"Multi-Purpose, Pump Set, Diesel Engine",,0.0195,2
+SP-SEA-0003,Spare Parts,Seals,Multi-Purpose,,0.008,3
+SP-BEA-0004,Spare Parts,Bearings,"Pump Set, Tractor",,0.0166,3
+SP-FIL-0005,Spare Parts,Filters,"Diesel Engine, Tractor, Pump Set",,0.0022,3
+SP-BEA-0006,Spare Parts,Bearings,"Diesel Engine, Multi-Purpose",,0.0194,3
+SP-BEA-0007,Spare Parts,Bearings,"Pump Set, Power Tiller",,0.0099,2
+SP-BEA-0008,Spare Parts,Bearings,"Pump Set, Diesel Engine",,0.0152,4
+SP-SEA-0009,Spare Parts,Seals,"Tractor, Power Tiller, Multi-Purpose",,0.0099,3
+SP-PIS-0010,Spare Parts,Piston Kits,"Tractor, Multi-Purpose, Power Tiller",,0.0137,2
+SP-FIL-0011,Spare Parts,Filters,"Multi-Purpose, Diesel Engine",,0.0168,2
+SP-SEA-0012,Spare Parts,Seals,"Multi-Purpose, Power Tiller",,0.014,2
+SP-SEA-0013,Spare Parts,Seals,"Multi-Purpose, Diesel Engine, Tractor",,0.016,2
+SP-GAS-0014,Spare Parts,Gaskets,Power Tiller,,0.0118,3
+SP-PIS-0015,Spare Parts,Piston Kits,"Tractor, Multi-Purpose",,0.0137,2
+SP-FIL-0016,Spare Parts,Filters,"Pump Set, Power Tiller",,0.0131,4
+SP-BEA-0017,Spare Parts,Bearings,"Multi-Purpose, Tractor",,0.0016,2
+SP-PIS-0018,Spare Parts,Piston Kits,Tractor,,0.0172,3
+SP-SEA-0019,Spare Parts,Seals,"Diesel Engine, Tractor, Power Tiller",,0.0063,2
+SP-GAS-0020,Spare Parts,Gaskets,"Tractor, Pump Set",,0.0136,4
+SP-PIS-0021,Spare Parts,Piston Kits,Power Tiller,,0.0014,2
+SP-BEA-0022,Spare Parts,Bearings,"Diesel Engine, Power Tiller, Pump Set",,0.0098,4
+SP-GAS-0023,Spare Parts,Gaskets,Tractor,,0.0095,4
+SP-PIS-0024,Spare Parts,Piston Kits,"Multi-Purpose, Tractor",,0.013,2
+SP-PIS-0025,Spare Parts,Piston Kits,"Diesel Engine, Pump Set",,0.0193,2
+SP-GAS-0026,Spare Parts,Gaskets,Diesel Engine,,0.0194,2
+SP-PIS-0027,Spare Parts,Piston Kits,"Power Tiller, Multi-Purpose, Diesel Engine",,0.0095,4
+SP-FIL-0028,Spare Parts,Filters,"Pump Set, Power Tiller, Diesel Engine",,0.0048,3
+SP-GAS-0029,Spare Parts,Gaskets,"Diesel Engine, Pump Set",,0.0154,4
+SP-PIS-0030,Spare Parts,Piston Kits,Diesel Engine,,0.0121,3
+SP-BEA-0031,Spare Parts,Bearings,"Diesel Engine, Pump Set, Power Tiller",,0.0089,2
+SP-BEA-0032,Spare Parts,Bearings,Pump Set,,0.003,2
+SP-BEA-0033,Spare Parts,Bearings,"Tractor, Multi-Purpose, Diesel Engine",,0.0186,2
+SP-PIS-0034,Spare Parts,Piston Kits,"Tractor, Pump Set",,0.0192,2
+SP-FIL-0035,Spare Parts,Filters,"Multi-Purpose, Diesel Engine, Tractor",,0.0102,2
+SP-GAS-0036,Spare Parts,Gaskets,"Pump Set, Power Tiller, Multi-Purpose",,0.0061,3
+SP-PIS-0037,Spare Parts,Piston Kits,Multi-Purpose,,0.0167,2
+SP-GAS-0038,Spare Parts,Gaskets,Power Tiller,,0.0115,2
+SP-BEA-0039,Spare Parts,Bearings,Diesel Engine,,0.0063,4
+SP-BEA-0040,Spare Parts,Bearings,Power Tiller,,0.0156,4
+SP-BEA-0041,Spare Parts,Bearings,Power Tiller,,0.0054,4
+SP-FIL-0042,Spare Parts,Filters,Multi-Purpose,,0.008,3
+SP-GAS-0043,Spare Parts,Gaskets,Multi-Purpose,,0.007,4
+SP-BEA-0044,Spare Parts,Bearings,"Diesel Engine, Multi-Purpose, Power Tiller",,0.0108,2
+SP-GAS-0045,Spare Parts,Gaskets,"Multi-Purpose, Power Tiller, Pump Set",,0.0093,2
+SP-SEA-0046,Spare Parts,Seals,Pump Set,,0.018,4
+SP-GAS-0047,Spare Parts,Gaskets,"Multi-Purpose, Pump Set",,0.0157,2
+SP-SEA-0048,Spare Parts,Seals,"Tractor, Power Tiller",,0.0152,2
+SP-SEA-0049,Spare Parts,Seals,Multi-Purpose,,0.0033,2
+SP-SEA-0050,Spare Parts,Seals,"Pump Set, Diesel Engine",,0.0044,2
+SP-FIL-0051,Spare Parts,Filters,"Pump Set, Multi-Purpose, Tractor",,0.0069,2
+SP-GAS-0052,Spare Parts,Gaskets,Tractor,,0.0013,2
+SP-PIS-0053,Spare Parts,Piston Kits,"Power Tiller, Tractor, Pump Set",,0.0139,2
+SP-BEA-0054,Spare Parts,Bearings,"Diesel Engine, Power Tiller, Pump Set",,0.0048,3
+SP-SEA-0055,Spare Parts,Seals,"Power Tiller, Diesel Engine",,0.0034,2
+SP-SEA-0056,Spare Parts,Seals,"Pump Set, Tractor",,0.0103,2
+SP-GAS-0057,Spare Parts,Gaskets,"Power Tiller, Pump Set",,0.0186,2
+SP-FIL-0058,Spare Parts,Filters,"Multi-Purpose, Pump Set, Power Tiller",,0.003,3
+SP-FIL-0059,Spare Parts,Filters,"Pump Set, Multi-Purpose, Tractor",,0.0187,3
+SP-SEA-0060,Spare Parts,Seals,Multi-Purpose,,0.0031,2
+SP-PIS-0061,Spare Parts,Piston Kits,"Pump Set, Diesel Engine",,0.0054,4
+SP-SEA-0062,Spare Parts,Seals,Pump Set,,0.0125,4
+SP-FIL-0063,Spare Parts,Filters,Diesel Engine,,0.0091,3
+SP-SEA-0064,Spare Parts,Seals,"Tractor, Power Tiller",,0.0096,4
+SP-SEA-0065,Spare Parts,Seals,"Power Tiller, Multi-Purpose, Diesel Engine",,0.0165,4
+SP-PIS-0066,Spare Parts,Piston Kits,Tractor,,0.0167,2
+SP-SEA-0067,Spare Parts,Seals,"Multi-Purpose, Power Tiller",,0.0185,2
+SP-GAS-0068,Spare Parts,Gaskets,"Diesel Engine, Power Tiller",,0.0032,2
+SP-FIL-0069,Spare Parts,Filters,"Pump Set, Multi-Purpose",,0.002,2
+SP-SEA-0070,Spare Parts,Seals,"Tractor, Pump Set, Multi-Purpose",,0.007,3
+SP-GAS-0071,Spare Parts,Gaskets,"Power Tiller, Tractor, Diesel Engine",,0.0044,2
+SP-SEA-0072,Spare Parts,Seals,Tractor,,0.0019,3
+SP-SEA-0073,Spare Parts,Seals,Multi-Purpose,,0.0029,3
+SP-FIL-0074,Spare Parts,Filters,"Power Tiller, Diesel Engine, Multi-Purpose",,0.0186,2
+SP-PIS-0075,Spare Parts,Piston Kits,"Diesel Engine, Multi-Purpose",,0.0162,4
+SP-BEA-0076,Spare Parts,Bearings,"Tractor, Diesel Engine, Pump Set",,0.0036,4
+SP-SEA-0077,Spare Parts,Seals,"Power Tiller, Multi-Purpose, Tractor",,0.0083,3
+SP-GAS-0078,Spare Parts,Gaskets,"Tractor, Power Tiller",,0.0089,3
+SP-GAS-0079,Spare Parts,Gaskets,"Tractor, Power Tiller",,0.0072,3
+SP-PIS-0080,Spare Parts,Piston Kits,"Diesel Engine, Pump Set, Multi-Purpose",,0.019,2
+LB-HYD-0001,Lubricants,Hydraulic Fluid,"Power Tiller, Multi-Purpose",560,0.0044,2
+LB-GRE-0002,Lubricants,Grease,Diesel Engine,645,0.0022,2
+LB-ENG-0003,Lubricants,Engine Oil,"Pump Set, Multi-Purpose, Power Tiller",439,0.0038,2
+LB-ENG-0004,Lubricants,Engine Oil,"Multi-Purpose, Diesel Engine",592,0.0013,3
+LB-COO-0005,Lubricants,Coolant,"Tractor, Diesel Engine",715,0.0042,2
+LB-COO-0006,Lubricants,Coolant,"Tractor, Multi-Purpose, Power Tiller",705,0.002,3
+LB-ENG-0007,Lubricants,Engine Oil,"Tractor, Pump Set",427,0.0033,1
+LB-GRE-0008,Lubricants,Grease,"Tractor, Multi-Purpose",631,0.0042,3
+LB-ENG-0009,Lubricants,Engine Oil,Diesel Engine,705,0.0015,3
+LB-ENG-0010,Lubricants,Engine Oil,"Power Tiller, Pump Set, Diesel Engine",543,0.0027,2
+LB-GRE-0011,Lubricants,Grease,Diesel Engine,693,0.0041,2
+LB-HYD-0012,Lubricants,Hydraulic Fluid,"Multi-Purpose, Power Tiller, Diesel Engine",559,0.0016,1
+LB-GRE-0013,Lubricants,Grease,"Multi-Purpose, Diesel Engine",505,0.0039,1
+LB-COO-0014,Lubricants,Coolant,"Diesel Engine, Power Tiller",589,0.0025,2
+LB-COO-0015,Lubricants,Coolant,"Diesel Engine, Power Tiller, Pump Set",713,0.0015,1
+LB-GRE-0016,Lubricants,Grease,Pump Set,376,0.001,3
+LB-GRE-0017,Lubricants,Grease,"Pump Set, Tractor",667,0.0022,3
+LB-HYD-0018,Lubricants,Hydraulic Fluid,"Power Tiller, Tractor",553,0.0041,3
+LB-ENG-0019,Lubricants,Engine Oil,"Diesel Engine, Power Tiller, Multi-Purpose",686,0.0021,3
+LB-GRE-0020,Lubricants,Grease,"Diesel Engine, Power Tiller, Pump Set",414,0.0014,2
+LB-HYD-0021,Lubricants,Hydraulic Fluid,Power Tiller,417,0.0041,3
+LB-COO-0022,Lubricants,Coolant,Power Tiller,470,0.0011,2
+LB-ENG-0023,Lubricants,Engine Oil,"Power Tiller, Pump Set, Tractor",383,0.0034,3
+LB-ENG-0024,Lubricants,Engine Oil,Diesel Engine,609,0.0047,3
+LB-COO-0025,Lubricants,Coolant,Pump Set,620,0.0044,2
+LB-ENG-0026,Lubricants,Engine Oil,"Pump Set, Multi-Purpose",406,0.003,1
+LB-ENG-0027,Lubricants,Engine Oil,"Diesel Engine, Multi-Purpose, Power Tiller",676,0.0016,3
+LB-GRE-0028,Lubricants,Grease,"Power Tiller, Multi-Purpose",556,0.0034,3
+LB-ENG-0029,Lubricants,Engine Oil,"Multi-Purpose, Power Tiller, Tractor",380,0.0045,2
+LB-ENG-0030,Lubricants,Engine Oil,"Diesel Engine, Tractor",502,0.0028,3
+EP-MON-0001,Electric Pumps,Monoblock Pump,"Tractor, Pump Set, Diesel Engine",2870,0.0863,3
+EP-DOM-0002,Electric Pumps,Domestic Pump,Power Tiller,2295,0.2851,4
+EP-CEN-0003,Electric Pumps,Centrifugal Pump,"Power Tiller, Multi-Purpose",2753,0.151,5
+EP-SUB-0004,Electric Pumps,Submersible Pump,"Tractor, Diesel Engine",3555,0.1262,3
+EP-CEN-0005,Electric Pumps,Centrifugal Pump,"Diesel Engine, Tractor",2983,0.153,3
+EP-DOM-0006,Electric Pumps,Domestic Pump,Pump Set,2923,0.059,3
+EP-CEN-0007,Electric Pumps,Centrifugal Pump,"Tractor, Pump Set",2690,0.1064,3
+EP-DOM-0008,Electric Pumps,Domestic Pump,"Tractor, Multi-Purpose",2823,0.2131,4
+EP-CEN-0009,Electric Pumps,Centrifugal Pump,"Pump Set, Tractor",2827,0.1579,4
+EP-DOM-0010,Electric Pumps,Domestic Pump,Multi-Purpose,3300,0.2716,5
+EP-MON-0011,Electric Pumps,Monoblock Pump,"Tractor, Power Tiller, Pump Set",2744,0.1801,3
+EP-CEN-0012,Electric Pumps,Centrifugal Pump,"Diesel Engine, Power Tiller, Pump Set",1901,0.068,3
+EP-DOM-0013,Electric Pumps,Domestic Pump,Power Tiller,2435,0.0932,5
+EP-DOM-0014,Electric Pumps,Domestic Pump,"Tractor, Pump Set, Multi-Purpose",3473,0.2568,3
+EP-SUB-0015,Electric Pumps,Submersible Pump,"Multi-Purpose, Pump Set",2922,0.0799,4
+EP-MON-0016,Electric Pumps,Monoblock Pump,"Power Tiller, Pump Set, Diesel Engine",2645,0.1277,5
+EP-MON-0017,Electric Pumps,Monoblock Pump,Diesel Engine,2995,0.0527,5
+EP-DOM-0018,Electric Pumps,Domestic Pump,"Diesel Engine, Multi-Purpose",2677,0.0915,3
+EP-MON-0019,Electric Pumps,Monoblock Pump,"Tractor, Pump Set, Power Tiller",2840,0.2598,5
+EP-CEN-0020,Electric Pumps,Centrifugal Pump,Pump Set,2425,0.2388,3
+EP-CEN-0021,Electric Pumps,Centrifugal Pump,Tractor,2681,0.0877,3
+EP-MON-0022,Electric Pumps,Monoblock Pump,Tractor,3542,0.1082,3
+EP-SUB-0023,Electric Pumps,Submersible Pump,"Multi-Purpose, Power Tiller",2720,0.1966,5
+EP-SUB-0024,Electric Pumps,Submersible Pump,"Pump Set, Multi-Purpose",3359,0.2094,5
+EP-MON-0025,Electric Pumps,Monoblock Pump,"Pump Set, Multi-Purpose",3218,0.0645,5
+EP-CEN-0026,Electric Pumps,Centrifugal Pump,"Diesel Engine, Multi-Purpose",3525,0.1706,5
+EP-CEN-0027,Electric Pumps,Centrifugal Pump,"Multi-Purpose, Power Tiller",2746,0.2774,3
+EP-CEN-0028,Electric Pumps,Centrifugal Pump,"Multi-Purpose, Power Tiller",2889,0.1829,4
+EP-MON-0029,Electric Pumps,Monoblock Pump,Power Tiller,3500,0.2077,4
+EP-CEN-0030,Electric Pumps,Centrifugal Pump,"Multi-Purpose, Diesel Engine",2402,0.0562,3
+EP-CEN-0031,Electric Pumps,Centrifugal Pump,Pump Set,2386,0.1996,4
+EP-CEN-0032,Electric Pumps,Centrifugal Pump,"Diesel Engine, Pump Set, Multi-Purpose",2135,0.2084,5
+EP-MON-0033,Electric Pumps,Monoblock Pump,"Diesel Engine, Power Tiller, Multi-Purpose",3215,0.2758,4
+EP-MON-0034,Electric Pumps,Monoblock Pump,"Tractor, Pump Set, Multi-Purpose",1960,0.2331,3
+EP-CEN-0035,Electric Pumps,Centrifugal Pump,Multi-Purpose,3595,0.2961,3
+EP-DOM-0036,Electric Pumps,Domestic Pump,Power Tiller,3596,0.1366,5
+EP-CEN-0037,Electric Pumps,Centrifugal Pump,"Diesel Engine, Multi-Purpose",1899,0.2443,5
+EP-CEN-0038,Electric Pumps,Centrifugal Pump,Diesel Engine,2418,0.1529,5
+EP-DOM-0039,Electric Pumps,Domestic Pump,"Diesel Engine, Power Tiller, Pump Set",1979,0.1889,4
+EP-SUB-0040,Electric Pumps,Submersible Pump,"Power Tiller, Multi-Purpose",1925,0.0622,4
+EN-PUM-0001,Engines,Pump Engine,"Diesel Engine, Pump Set, Tractor",6254,1.6606,4
+EN-DIE-0002,Engines,Diesel Engine,Multi-Purpose,6964,1.4328,4
+EN-POW-0003,Engines,Power Tiller Engine,"Tractor, Diesel Engine, Power Tiller",3666,1.2719,4
+EN-PUM-0004,Engines,Pump Engine,"Pump Set, Diesel Engine",5879,0.8565,5
+EN-PUM-0005,Engines,Pump Engine,"Multi-Purpose, Tractor",6765,0.9484,5
+EN-DIE-0006,Engines,Diesel Engine,"Power Tiller, Tractor, Pump Set",5656,0.7814,5
+EN-POW-0007,Engines,Power Tiller Engine,Diesel Engine,6597,1.9981,5
+EN-POW-0008,Engines,Power Tiller Engine,Multi-Purpose,5600,1.3623,4
+EN-PUM-0009,Engines,Pump Engine,"Multi-Purpose, Tractor",6208,1.3928,4
+EN-POW-0010,Engines,Power Tiller Engine,Power Tiller,4906,1.0481,4
+EN-POW-0011,Engines,Power Tiller Engine,"Diesel Engine, Multi-Purpose",4387,0.5265,4
+EN-POW-0012,Engines,Power Tiller Engine,"Diesel Engine, Pump Set, Multi-Purpose",5291,1.9388,4
+EN-POW-0013,Engines,Power Tiller Engine,Multi-Purpose,6924,0.8526,5
+EN-PUM-0014,Engines,Pump Engine,Pump Set,4767,1.6135,5
+EN-POW-0015,Engines,Power Tiller Engine,Tractor,6035,0.9491,5
+EN-DIE-0016,Engines,Diesel Engine,Tractor,4297,1.8115,4
+EN-DIE-0017,Engines,Diesel Engine,"Tractor, Multi-Purpose, Diesel Engine",5699,1.688,5
+EN-PUM-0018,Engines,Pump Engine,"Diesel Engine, Pump Set, Tractor",5800,1.722,5
+EN-DIE-0019,Engines,Diesel Engine,"Tractor, Multi-Purpose",5702,0.6528,4
+EN-POW-0020,Engines,Power Tiller Engine,"Diesel Engine, Power Tiller, Pump Set",7062,0.5538,4
+PC-ROT-0001,Precision Components,Rotary Assembly,"Diesel Engine, Tractor, Pump Set",,0.0159,4
+PC-ROT-0002,Precision Components,Rotary Assembly,"Diesel Engine, Tractor",,0.02,4
+PC-VAL-0003,Precision Components,Valve Assembly,"Tractor, Multi-Purpose, Power Tiller",,0.0286,5
+PC-ROT-0004,Precision Components,Rotary Assembly,"Power Tiller, Diesel Engine",,0.0201,4
+PC-ROT-0005,Precision Components,Rotary Assembly,Tractor,,0.0541,5
+PC-LOC-0006,Precision Components,Locomotive Coupling,"Pump Set, Diesel Engine",,0.0803,4
+PC-ROT-0007,Precision Components,Rotary Assembly,"Multi-Purpose, Tractor, Diesel Engine",,0.0318,4
+PC-PRE-0008,Precision Components,Precision Gear,"Pump Set, Power Tiller",,0.0937,4
+PC-VAL-0009,Precision Components,Valve Assembly,"Tractor, Power Tiller",,0.0235,5
+PC-ROT-0010,Precision Components,Rotary Assembly,"Diesel Engine, Multi-Purpose, Power Tiller",,0.0108,5
+PC-PRE-0011,Precision Components,Precision Gear,Pump Set,,0.0317,5
+PC-ROT-0012,Precision Components,Rotary Assembly,"Power Tiller, Tractor",,0.0864,5
+PC-PRE-0013,Precision Components,Precision Gear,"Diesel Engine, Multi-Purpose, Pump Set",,0.0246,5
+PC-ROT-0014,Precision Components,Rotary Assembly,"Diesel Engine, Multi-Purpose, Tractor",,0.0509,5
+PC-PRE-0015,Precision Components,Precision Gear,"Diesel Engine, Power Tiller",,0.0387,5
+PC-LOC-0016,Precision Components,Locomotive Coupling,"Multi-Purpose, Tractor",,0.0473,4
+PC-VAL-0017,Precision Components,Valve Assembly,"Diesel Engine, Power Tiller",,0.0412,4
+PC-PRE-0018,Precision Components,Precision Gear,Diesel Engine,,0.0737,5
+PC-VAL-0019,Precision Components,Valve Assembly,Pump Set,,0.0901,4
+PC-ROT-0020,Precision Components,Rotary Assembly,"Pump Set, Power Tiller, Multi-Purpose",,0.0229,4
+PC-ROT-0021,Precision Components,Rotary Assembly,"Power Tiller, Multi-Purpose, Pump Set",,0.0104,5
+PC-LOC-0022,Precision Components,Locomotive Coupling,Multi-Purpose,,0.0908,4
+PC-LOC-0023,Precision Components,Locomotive Coupling,Tractor,,0.066,5
+PC-PRE-0024,Precision Components,Precision Gear,Tractor,,0.0635,4
+PC-LOC-0025,Precision Components,Locomotive Coupling,Power Tiller,,0.0853,5
+PC-ROT-0026,Precision Components,Rotary Assembly,"Pump Set, Tractor, Diesel Engine",,0.0308,5
+PC-ROT-0027,Precision Components,Rotary Assembly,"Pump Set, Diesel Engine, Multi-Purpose",,0.0457,5
+PC-LOC-0028,Precision Components,Locomotive Coupling,Pump Set,,0.0985,5
+PC-VAL-0029,Precision Components,Valve Assembly,Diesel Engine,,0.0111,5
+PC-LOC-0030,Precision Components,Locomotive Coupling,"Multi-Purpose, Power Tiller, Diesel Engine",,0.0467,5

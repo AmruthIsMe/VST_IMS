@@ -1,0 +1,30 @@
+Supplier_ID,Origin_Country,Primary_Category,Base_Lead_Time_Days,Lead_Time_Volatility,Minimum_Order_Quantity,Unit_Cost_INR
+SUP-JP-001,Japan,Precision Components,52,0.165,11,62750.65
+SUP-JP-002,Japan,Precision Components,53,0.17,27,59886.09
+SUP-JP-003,Japan,Engines,56,0.197,7,148228.36
+SUP-JP-004,Japan,Engines,85,0.188,6,149671.23
+SUP-JP-005,Japan,Precision Components,75,0.228,16,39841.13
+SUP-JP-006,Japan,Precision Components,49,0.24,27,53188.7
+SUP-CN-007,China,Electric Pumps,53,0.341,25,15487.37
+SUP-CN-008,China,Spare Parts,31,0.496,88,1472.31
+SUP-CN-009,China,Spare Parts,72,0.379,83,719.97
+SUP-CN-010,China,Electric Pumps,58,0.416,23,12991.24
+SUP-CN-011,China,Spare Parts,56,0.394,81,489.88
+SUP-CN-012,China,Spare Parts,47,0.379,43,426.2
+SUP-CN-013,China,Spare Parts,44,0.368,151,1915.21
+SUP-CN-014,China,Electric Pumps,41,0.32,39,17906.23
+SUP-CN-015,China,Electric Pumps,45,0.34,27,5669.48
+SUP-DE-016,Germany,Precision Components,91,0.147,8,25012.19
+SUP-DE-017,Germany,Precision Components,62,0.148,11,72254.93
+SUP-DE-018,Germany,Precision Components,99,0.15,11,14971.71
+SUP-DE-019,Germany,Precision Components,75,0.129,12,59124.24
+SUP-IN-020,India,Spare Parts,28,0.14,198,2458.56
+SUP-IN-021,India,Lubricants,15,0.057,474,379.13
+SUP-IN-022,India,Spare Parts,14,0.105,37,2137.62
+SUP-IN-023,India,Lubricants,24,0.104,86,414.9
+SUP-IN-024,India,Spare Parts,13,0.066,174,1522.94
+SUP-IN-025,India,Lubricants,19,0.08,426,682.63
+SUP-IN-026,India,Spare Parts,16,0.126,159,636.01
+SUP-IN-027,India,Lubricants,21,0.062,377,1364.96
+SUP-IN-028,India,Spare Parts,9,0.076,173,571.81
+SUP-IN-029,India,Spare Parts,22,0.095,179,726.36
