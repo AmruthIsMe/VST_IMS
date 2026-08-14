@@ -1,0 +1,6 @@
+Order_ID,Date,Customer_Name,Total_Amount_INR,Payment_Status,Order_Status
+ORD-1001,2025-12-25 10:15:00,Ramesh Agri Corp,14500.50,Paid,Delivered
+ORD-1002,2025-12-26 11:30:00,Suresh Farms,8900.00,Pending,Shipped
+ORD-1003,2025-12-27 14:45:00,Kisan Solutions,22400.75,Paid,Processing
+ORD-1004,2025-12-28 09:20:00,Green Earth Distributors,45000.00,Overdue,Delivered
+ORD-1005,2025-12-29 16:10:00,Malur Tractors Ltd,12350.25,Pending,Processing

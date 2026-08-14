@@ -38,3 +38,10 @@ ENV/
 # Operating System
 .DS_Store
 Thumbs.db
+
+# Databases & Environment
+*.db
+*.db-shm
+*.db-wal
+.env
+
