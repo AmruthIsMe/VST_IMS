@@ -2,9 +2,24 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getOrders, createOrder, updateOrder, deleteOrder } from '../services/api';
 import Header from '../components/Header';
-import { ShoppingCart, History, Clock, Truck, AlertCircle, Search, Plus, FileText, Pencil, Trash2 } from 'lucide-react';
+import { ShoppingCart, History, Clock, Truck, AlertCircle, Search, Plus, FileText, Pencil, Trash2, CheckCircle } from 'lucide-react';
 
 const EMPTY = { order_id: '', order_date: new Date().toISOString().split('T')[0], customer_name: '', total_amount_inr: '50000', payment_status: 'Pending', order_status: 'Processing', items: [] };
+
+const ACTIVE_ORDERS = [
+  { id: 'ORD-2026-0041', date: '13 Aug 2026, 12:09 PM', client: 'Acer Technologies Ltd.', amt: '₹1,28,500', pay: 'Paid', status: 'Processing' },
+  { id: 'ORD-2026-0040', date: '12 Aug 2026, 12:09 PM', client: 'Bosch Limited', amt: '₹46,300', pay: 'Pending', status: 'Shipped' },
+  { id: 'ORD-2026-0038', date: '08 Aug 2026, 12:09 PM', client: 'Dell International', amt: '₹22,100', pay: 'Overdue', status: 'Processing' },
+  { id: 'ORD-2026-0035', date: '01 Aug 2026, 12:09 PM', client: 'Escorts Group', amt: '₹1,93,400', pay: 'Pending', status: 'Shipped' },
+];
+
+const ORDER_HISTORY = [
+  { id: 'ORD-2026-0032', date: '28 Jul 2026, 09:15 AM', client: 'Tata Motors Spares', amt: '₹3,45,200', pay: 'Paid', status: 'Delivered' },
+  { id: 'ORD-2026-0029', date: '22 Jul 2026, 03:30 PM', client: 'Mahindra & Mahindra', amt: '₹1,87,600', pay: 'Paid', status: 'Delivered' },
+  { id: 'ORD-2026-0025', date: '15 Jul 2026, 11:00 AM', client: 'Ashok Leyland', amt: '₹92,400', pay: 'Paid', status: 'Delivered' },
+  { id: 'ORD-2026-0021', date: '08 Jul 2026, 02:45 PM', client: 'Eicher Motors', amt: '₹2,15,800', pay: 'Paid', status: 'Delivered' },
+  { id: 'ORD-2026-0018', date: '01 Jul 2026, 10:20 AM', client: 'Bosch Limited', amt: '₹56,900', pay: 'Paid', status: 'Delivered' },
+];
 
 export default function Orders() {
   const qc = useQueryClient();
@@ -37,8 +52,18 @@ export default function Orders() {
 
   const getOrderStatusBadge = (status) => {
     if (status === 'Shipped') return <span className="badge-pill badge-shipped">Shipped</span>;
+    if (status === 'Delivered') return <span className="badge-pill badge-delivered">Delivered</span>;
     return <span className="badge-pill badge-processing">Processing</span>;
   };
+
+  const currentOrders = activeTab === 'active' ? ACTIVE_ORDERS : ORDER_HISTORY;
+
+  const filteredOrders = currentOrders.filter((o) => {
+    if (search && !o.id.toLowerCase().includes(search.toLowerCase()) && !o.client.toLowerCase().includes(search.toLowerCase())) return false;
+    if (payFilter && o.pay !== payFilter) return false;
+    if (statusFilter && o.status !== statusFilter) return false;
+    return true;
+  });
 
   return (
     <div>
@@ -69,48 +94,86 @@ export default function Orders() {
           </button>
         </div>
 
-        {/* KPI Cards */}
-        <div className="kpi-grid">
-          <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <div className="kpi-icon-box kpi-icon-blue">
-              <ShoppingCart size={22} />
+        {/* KPI Cards - Different for Active vs History */}
+        {activeTab === 'active' ? (
+          <div className="kpi-grid">
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-blue">
+                <ShoppingCart size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Total Active</div>
+                <div className="kpi-value">4</div>
+              </div>
             </div>
-            <div>
-              <div className="kpi-label">Total Active</div>
-              <div className="kpi-value">4</div>
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-orange">
+                <Clock size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Processing</div>
+                <div className="kpi-value kpi-value-orange">2</div>
+              </div>
+            </div>
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-green">
+                <Truck size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Shipped</div>
+                <div className="kpi-value kpi-value-green">2</div>
+              </div>
+            </div>
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-red">
+                <AlertCircle size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Overdue Payment</div>
+                <div className="kpi-value kpi-value-red">1</div>
+              </div>
             </div>
           </div>
-
-          <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <div className="kpi-icon-box kpi-icon-orange">
-              <Clock size={22} />
+        ) : (
+          <div className="kpi-grid">
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-green">
+                <CheckCircle size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Total Delivered</div>
+                <div className="kpi-value kpi-value-green">5</div>
+              </div>
             </div>
-            <div>
-              <div className="kpi-label">Processing</div>
-              <div className="kpi-value kpi-value-orange">2</div>
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-blue">
+                <FileText size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Total Revenue</div>
+                <div className="kpi-value">₹8,97,900</div>
+              </div>
+            </div>
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-green">
+                <Truck size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">Avg Order Value</div>
+                <div className="kpi-value">₹1,79,580</div>
+              </div>
+            </div>
+            <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <div className="kpi-icon-box kpi-icon-orange">
+                <Clock size={22} />
+              </div>
+              <div>
+                <div className="kpi-label">This Month</div>
+                <div className="kpi-value kpi-value-orange">3</div>
+              </div>
             </div>
           </div>
-
-          <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <div className="kpi-icon-box kpi-icon-green">
-              <Truck size={22} />
-            </div>
-            <div>
-              <div className="kpi-label">Shipped</div>
-              <div className="kpi-value kpi-value-green">2</div>
-            </div>
-          </div>
-
-          <div className="kpi-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <div className="kpi-icon-box kpi-icon-red">
-              <AlertCircle size={22} />
-            </div>
-            <div>
-              <div className="kpi-label">Overdue Payment</div>
-              <div className="kpi-value kpi-value-red">1</div>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Toolbar & Create Button */}
         <div className="toolbar-card">
@@ -134,9 +197,14 @@ export default function Orders() {
 
             <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
               <option value="">All Statuses</option>
-              <option value="Processing">Processing</option>
-              <option value="Shipped">Shipped</option>
-              <option value="Delivered">Delivered</option>
+              {activeTab === 'active' ? (
+                <>
+                  <option value="Processing">Processing</option>
+                  <option value="Shipped">Shipped</option>
+                </>
+              ) : (
+                <option value="Delivered">Delivered</option>
+              )}
             </select>
           </div>
 
@@ -148,9 +216,9 @@ export default function Orders() {
         {/* Table Card */}
         <div className="card-table-container">
           <div className="table-card-header">
-            <div className="table-card-title">Active Orders</div>
+            <div className="table-card-title">{activeTab === 'active' ? 'Active Orders' : 'Order History'}</div>
             <div className="showing-count">
-              Showing <strong>{data?.items?.length || 4}</strong> orders
+              Showing <strong>{filteredOrders.length}</strong> orders
             </div>
           </div>
 
@@ -168,57 +236,35 @@ export default function Orders() {
                 </tr>
               </thead>
               <tbody>
-                {(data?.items || []).map((o, idx) => {
-                  const demoOrders = [
-                    { id: 'ORD-2026-0041', date: '13 Aug 2026 12:09 pm', client: 'Acer Technologies Ltd.', amt: '₹1,28,500', pay: 'Paid', status: 'Processing' },
-                    { id: 'ORD-2026-0040', date: '12 Aug 2026 12:09 pm', client: 'Bosch Limited', amt: '₹46,300', pay: 'Pending', status: 'Shipped' },
-                    { id: 'ORD-2026-0038', date: '08 Aug 2026 12:09 pm', client: 'Dell International', amt: '₹22,100', pay: 'Overdue', status: 'Processing' },
-                    { id: 'ORD-2026-0035', date: '01 Aug 2026 12:09 pm', client: 'Escorts Group', amt: '₹1,93,400', pay: 'Pending', status: 'Shipped' },
-                  ];
-
-                  const row = demoOrders[idx % demoOrders.length];
-                  const orderId = o.order_id || row.id;
-                  const client = o.customer_name || row.client;
-                  const amt = o.total_amount_inr ? `₹${Number(o.total_amount_inr).toLocaleString()}` : row.amt;
-                  const pay = o.payment_status || row.pay;
-                  const status = o.order_status || row.status;
-
-                  return (
-                    <tr key={o.id}>
-                      <td style={{ fontWeight: 700, color: '#0284c7' }}>{orderId}</td>
-                      <td style={{ color: '#64748b' }}>{row.date}</td>
-                      <td style={{ fontWeight: 700, color: '#1e293b' }}>{client}</td>
-                      <td style={{ fontWeight: 700 }}>{amt}</td>
-                      <td>{getPaymentBadge(pay)}</td>
-                      <td>{getOrderStatusBadge(status)}</td>
-                      <td>
-                        <div className="action-buttons">
-                          <button className="act-btn act-invoice" onClick={() => alert(`Generating invoice for ${orderId}`)}>
-                            <FileText size={13} /> Invoice
-                          </button>
-                          <button className="act-btn act-edit" onClick={() => openEdit(o)}>
-                            <Pencil size={13} /> Edit
-                          </button>
-                          <button className="act-btn act-delete" onClick={() => { if (confirm('Delete?')) deleteMut.mutate(o.id); }}>
-                            <Trash2 size={13} /> Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filteredOrders.map((row, idx) => (
+                  <tr key={row.id}>
+                    <td style={{ fontWeight: 700, color: '#0284c7' }}>{row.id}</td>
+                    <td style={{ color: '#64748b' }}>{row.date}</td>
+                    <td style={{ fontWeight: 700, color: '#1e293b' }}>{row.client}</td>
+                    <td style={{ fontWeight: 700 }}>{row.amt}</td>
+                    <td>{getPaymentBadge(row.pay)}</td>
+                    <td>{getOrderStatusBadge(row.status)}</td>
+                    <td>
+                      <div className="action-buttons">
+                        <button className="act-btn act-invoice" onClick={() => alert(`Generating invoice for ${row.id}`)}>
+                          <FileText size={13} /> Invoice
+                        </button>
+                        {activeTab === 'active' && (
+                          <>
+                            <button className="act-btn act-edit" onClick={() => openEdit(row)}>
+                              <Pencil size={13} /> Edit
+                            </button>
+                            <button className="act-btn act-delete" onClick={() => { if (confirm('Delete?')) deleteMut.mutate(row.id); }}>
+                              <Trash2 size={13} /> Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-
-          {data && data.total_pages > 1 && (
-            <div className="pagination-container">
-              <button className="page-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
-              {Array.from({ length: Math.min(data.total_pages, 5) }, (_, i) => i + 1).map((p) => (
-                <button key={p} className={`page-btn ${p === page ? 'active' : ''}`} onClick={() => setPage(p)}>{p}</button>
-              ))}
-              <button className="page-btn" disabled={page >= data.total_pages} onClick={() => setPage(page + 1)}>Next</button>
-            </div>
           )}
         </div>
       </div>

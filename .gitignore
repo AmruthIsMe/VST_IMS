@@ -45,3 +45,6 @@ Thumbs.db
 *.db-wal
 .env
 
+# Model Artifacts
+*.joblib
+

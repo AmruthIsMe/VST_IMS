@@ -1,15 +1,17 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
 // Dashboard
 export const getKPIs = () => api.get('/dashboard/kpis');
-export const getDemandTrend = () => api.get('/dashboard/charts/demand-trend');
+export const getDemandTrend = (params) => api.get('/dashboard/charts/demand-trend', { params });
 export const getCategoryDistribution = () => api.get('/dashboard/charts/category-distribution');
 export const getSalesByRegion = () => api.get('/dashboard/charts/sales-by-region');
+export const getStockoutRisk = (params) => api.get('/dashboard/stockout-risk', { params });
+export const getCategoryForecast = () => api.get('/dashboard/charts/category-forecast');
 
 // Products
 export const getProducts = (params) => api.get('/products', { params });
@@ -45,5 +47,33 @@ export const getSapSyncStatus = () => api.get('/sap/sync-status');
 export const testSapConnection = () => api.post('/sap/test-connection');
 export const triggerSapSync = (syncType) => api.post('/sap/sync', { sync_type: syncType });
 export const updateSapConfig = (data) => api.post('/sap/config', null, { params: data });
+
+// ─── Demand Forecasting ─────────────────────────────────────────────
+export const trainForecastModels = (params) => api.post('/forecast/train', null, { params });
+export const getForecastPredictions = (params) => api.get('/forecast/predict', { params });
+export const compareForecastModels = (params) => api.get('/forecast/compare', { params });
+export const getForecastMetrics = (params) => api.get('/forecast/metrics', { params });
+export const getEnsembleWeights = () => api.get('/forecast/ensemble-weights');
+export const retrainForecastModels = (params) => api.post('/forecast/retrain', null, { params });
+export const listForecastModels = () => api.get('/forecast/models');
+export const getForecastSummary = () => api.get('/forecast/summary');
+export const getSkuExplorer = (params) => api.get('/forecast/sku-explorer', { params });
+export const getForecastProducts = (params) => api.get('/forecast/products', { params });
+export const getReorderRecommendations = () => api.get('/forecast/reorder-recommendations');
+export const getDriftMonitor = (params) => api.get('/forecast/drift-monitor', { params });
+export const exportForecastCsv = (params) => api.get('/forecast/export-csv', { params, responseType: 'blob' });
+export const getForecastCalendar = (params) => api.get('/forecast/calendar', { params });
+
+// ─── Genie Chatbot ──────────────────────────────────────────────────
+export const sendGenieMessage = (message, conversationId) =>
+  api.post('/genie/chat', { message, conversation_id: conversationId });
+export const getGenieSuggestions = () => api.get('/genie/suggestions');
+export const runWhatIf = (scenarioType, parameters) =>
+  api.post('/genie/what-if', { scenario_type: scenarioType, parameters });
+export const getGenieHistory = (conversationId) =>
+  api.get(`/genie/history`, { params: { conversation_id: conversationId } });
+export const getGenieCapabilities = () => api.get('/genie/capabilities');
+export const exportGenieCsv = (reasoningTrace) =>
+  api.post('/genie/export-csv', { reasoning_trace: reasoningTrace }, { responseType: 'blob' });
 
 export default api;

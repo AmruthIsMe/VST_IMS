@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Settings, Truck, Database,
-  LogOut, Box
+  LogOut, Box, TrendingUp, Sparkles
 } from 'lucide-react';
 
 const navItems = [
@@ -10,6 +10,8 @@ const navItems = [
   { to: '/products', icon: Package, label: 'Products' },
   { to: '/orders', icon: ShoppingCart, label: 'Orders' },
   { to: '/suppliers', icon: Truck, label: 'Suppliers' },
+  { to: '/forecasting', icon: TrendingUp, label: 'Demand Forecast' },
+  { to: '/genie', icon: Sparkles, label: 'Genie' },
   { to: '/users', icon: Users, label: 'Users' },
   { to: '/sap-sync', icon: Database, label: 'SAP Sync' },
   { to: '/settings', icon: Settings, label: 'Account Settings' },
@@ -20,7 +22,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-header">
         <div className="sidebar-logo-box">
-          <Box size={22} color="#ffffff" />
+          <img src="/VST(logo).png" alt="VST Logo" className="sidebar-logo-img" />
         </div>
         <div className="sidebar-brand">
           <span className="sidebar-title">Inventory MS</span>

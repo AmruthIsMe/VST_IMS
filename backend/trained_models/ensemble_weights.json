@@ -1,0 +1,56 @@
+{
+  "weights": {
+    "xgboost": 0.2339,
+    "lightgbm": 0.2696,
+    "arima": 0.0835,
+    "sarima": 0.119,
+    "prophet": 0.1778,
+    "holt_winters": 0.1162
+  },
+  "history": [
+    {
+      "date": "2026-08-14T19:44:02.567822",
+      "weights": {
+        "lightgbm": 0.355,
+        "arima": 0.1085,
+        "sarima": 0.1546,
+        "prophet": 0.231,
+        "holt_winters": 0.1509,
+        "xgboost": 0.0
+      }
+    },
+    {
+      "date": "2026-08-14T19:44:26.639578",
+      "weights": {
+        "xgboost": 0.2279,
+        "lightgbm": 0.2881,
+        "arima": 0.0814,
+        "sarima": 0.116,
+        "prophet": 0.1733,
+        "holt_winters": 0.1132
+      }
+    },
+    {
+      "date": "2026-08-14T21:29:53.283379",
+      "weights": {
+        "xgboost": 0.2339,
+        "lightgbm": 0.2696,
+        "arima": 0.0835,
+        "sarima": 0.119,
+        "prophet": 0.1778,
+        "holt_winters": 0.1162
+      }
+    },
+    {
+      "date": "2026-08-14T21:38:26.017309",
+      "weights": {
+        "xgboost": 0.2339,
+        "lightgbm": 0.2696,
+        "arima": 0.0835,
+        "sarima": 0.119,
+        "prophet": 0.1778,
+        "holt_winters": 0.1162
+      }
+    }
+  ]
+}

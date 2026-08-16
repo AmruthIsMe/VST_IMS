@@ -16,8 +16,13 @@ export default function Header({ pageSubtitle, locationText }) {
   return (
     <header className="top-header">
       <div className="header-left">
-        <h1 className="header-title">VST Tillers & Tractors</h1>
-        <p className="header-subtitle">Supply Chain Intelligence Platform</p>
+        <div className="header-logo-row">
+          <img src="/VST(logo).png" alt="VST Logo" className="header-logo" />
+          <div>
+            <h1 className="header-title">VST Tillers & Tractors</h1>
+            <p className="header-subtitle">Supply Chain Intelligence Platform</p>
+          </div>
+        </div>
       </div>
 
       {locationText && (

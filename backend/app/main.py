@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import get_settings
 from app.database import engine, Base
-from app.routers import products, suppliers, orders, users, dashboard, sap_sync
+from app.routers import products, suppliers, orders, users, dashboard, sap_sync, forecast, genie
 
 settings = get_settings()
 
@@ -33,6 +33,8 @@ app.include_router(suppliers.router)
 app.include_router(orders.router)
 app.include_router(users.router)
 app.include_router(sap_sync.router)
+app.include_router(forecast.router)
+app.include_router(genie.router)
 
 
 @app.get("/api/health")

@@ -1,0 +1,181 @@
+[
+  {
+    "date": "2026-08-14T19:44:02.569278",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 23.5,
+    "models_trained": 5,
+    "ensemble_mape": 5.16,
+    "weights": {
+      "lightgbm": 0.355,
+      "arima": 0.1085,
+      "sarima": 0.1546,
+      "prophet": 0.231,
+      "holt_winters": 0.1509,
+      "xgboost": 0.0
+    }
+  },
+  {
+    "date": "2026-08-14T19:44:26.641702",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 16.6,
+    "models_trained": 6,
+    "ensemble_mape": 5.21,
+    "weights": {
+      "xgboost": 0.2279,
+      "lightgbm": 0.2881,
+      "arima": 0.0814,
+      "sarima": 0.116,
+      "prophet": 0.1733,
+      "holt_winters": 0.1132
+    }
+  },
+  {
+    "date": "2026-08-14T19:49:48.071238",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.9,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.16666666666666666,
+      "lightgbm": 0.16666666666666666,
+      "arima": 0.16666666666666666,
+      "sarima": 0.16666666666666666,
+      "prophet": 0.16666666666666666,
+      "holt_winters": 0.16666666666666666
+    }
+  },
+  {
+    "date": "2026-08-14T19:50:06.171261",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.9,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.16666666666666666,
+      "lightgbm": 0.16666666666666666,
+      "arima": 0.16666666666666666,
+      "sarima": 0.16666666666666666,
+      "prophet": 0.16666666666666666,
+      "holt_winters": 0.16666666666666666
+    }
+  },
+  {
+    "date": "2026-08-14T19:50:43.335567",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.8,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.16666666666666666,
+      "lightgbm": 0.16666666666666666,
+      "arima": 0.16666666666666666,
+      "sarima": 0.16666666666666666,
+      "prophet": 0.16666666666666666,
+      "holt_winters": 0.16666666666666666
+    }
+  },
+  {
+    "date": "2026-08-14T19:56:20.694401",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.8,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.16666666666666666,
+      "lightgbm": 0.16666666666666666,
+      "arima": 0.16666666666666666,
+      "sarima": 0.16666666666666666,
+      "prophet": 0.16666666666666666,
+      "holt_winters": 0.16666666666666666
+    }
+  },
+  {
+    "date": "2026-08-14T20:31:18.146923",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.8,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.16666666666666666,
+      "lightgbm": 0.16666666666666666,
+      "arima": 0.16666666666666666,
+      "sarima": 0.16666666666666666,
+      "prophet": 0.16666666666666666,
+      "holt_winters": 0.16666666666666666
+    },
+    "error": "All models failed"
+  },
+  {
+    "date": "2026-08-14T21:01:04.505395",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.9,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.16666666666666666,
+      "lightgbm": 0.16666666666666666,
+      "arima": 0.16666666666666666,
+      "sarima": 0.16666666666666666,
+      "prophet": 0.16666666666666666,
+      "holt_winters": 0.16666666666666666
+    },
+    "error": "All models failed"
+  },
+  {
+    "date": "2026-08-14T21:29:53.292005",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 6.9,
+    "models_trained": 6,
+    "ensemble_mape": 5.48,
+    "weights": {
+      "xgboost": 0.2339,
+      "lightgbm": 0.2696,
+      "arima": 0.0835,
+      "sarima": 0.119,
+      "prophet": 0.1778,
+      "holt_winters": 0.1162
+    }
+  },
+  {
+    "date": "2026-08-14T21:38:26.017309",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 6.8,
+    "models_trained": 6,
+    "ensemble_mape": 5.48,
+    "weights": {
+      "xgboost": 0.2339,
+      "lightgbm": 0.2696,
+      "arima": 0.0835,
+      "sarima": 0.119,
+      "prophet": 0.1778,
+      "holt_winters": 0.1162
+    }
+  },
+  {
+    "date": "2026-08-14T22:42:36.625074",
+    "sku_id": null,
+    "category": null,
+    "elapsed_seconds": 0.8,
+    "models_trained": 0,
+    "ensemble_mape": null,
+    "weights": {
+      "xgboost": 0.2339,
+      "lightgbm": 0.2696,
+      "arima": 0.0835,
+      "sarima": 0.119,
+      "prophet": 0.1778,
+      "holt_winters": 0.1162
+    },
+    "error": "All models failed"
+  }
+]

@@ -173,3 +173,60 @@ class SapConfig(Base):
     language = Column(String(10), default="EN")
     is_active = Column(Boolean, default=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ForecastModel(Base):
+    __tablename__ = "forecast_models"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model_name = Column(String(50), nullable=False)
+    model_type = Column(String(50), nullable=False)
+    sku_id = Column(String(50), nullable=True)
+    category = Column(String(100), nullable=True)
+    trained_at = Column(DateTime, default=datetime.utcnow)
+    mae = Column(Float, nullable=True)
+    mape = Column(Float, nullable=True)
+    rmse = Column(Float, nullable=True)
+    smape = Column(Float, nullable=True)
+    bias = Column(Float, nullable=True)
+    model_path = Column(String(500), nullable=True)
+    is_active = Column(Boolean, default=True)
+    ensemble_weight = Column(Float, default=0.0)
+
+
+class ForecastPrediction(Base):
+    __tablename__ = "forecast_predictions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model_name = Column(String(50), nullable=False)
+    sku_id = Column(String(50), nullable=False)
+    forecast_date = Column(Date, nullable=False)
+    predicted_demand = Column(Float, nullable=False)
+    lower_bound = Column(Float, nullable=True)
+    upper_bound = Column(Float, nullable=True)
+    actual_demand = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GenieConversation(Base):
+    __tablename__ = "genie_conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(String(100), unique=True, nullable=False, index=True)
+    title = Column(String(200), default="New Conversation")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GenieMessage(Base):
+    __tablename__ = "genie_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(String(100), nullable=False, index=True)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    intent = Column(String(50), nullable=True)
+    confidence_level = Column(String(20), nullable=True)
+    confidence_tag = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
