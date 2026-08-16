@@ -21,7 +21,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,6 +37,12 @@ app.include_router(forecast.router)
 app.include_router(genie.router)
 
 
+@app.get("/")
+def root():
+    return {"status": "healthy", "message": "VST IMS API is running", "app": settings.APP_NAME}
+
+
 @app.get("/api/health")
 def health_check():
     return {"status": "healthy", "app": settings.APP_NAME}
+
