@@ -162,7 +162,15 @@ class StockAdvisorAgent:
             max_sale_date = max_date_result.scalar()
             if max_sale_date is None:
                 return {"skus": [], "count": 0, "error": "No sales data found"}
-            max_sale_date_str = str(max_sale_date)[:10]
+            
+            if isinstance(max_sale_date, str):
+                max_dt = pd.to_datetime(max_sale_date).date()
+            elif hasattr(max_sale_date, "date"):
+                max_dt = max_sale_date.date()
+            else:
+                max_dt = max_sale_date
+
+            cutoff_date = max_dt - timedelta(days=91)
 
             sql_parts = [
                 "SELECT s.sku_id, p.category, p.sub_category, p.criticality_score,",
@@ -173,9 +181,9 @@ class StockAdvisorAgent:
                 "JOIN products p ON s.product_id = p.id",
             ]
             conditions = [
-                f"s.sale_date >= DATE(:max_date, '-91 days')",
+                "s.sale_date >= :cutoff_date",
             ]
-            params = {"max_date": max_sale_date_str}
+            params = {"cutoff_date": cutoff_date}
 
             if target_skus:
                 placeholders = ", ".join(f"'{s}'" for s in target_skus)
@@ -185,7 +193,7 @@ class StockAdvisorAgent:
                 params["cat"] = category
 
             sql_parts.append("WHERE " + " AND ".join(conditions))
-            sql_parts.append("GROUP BY s.sku_id")
+            sql_parts.append("GROUP BY s.sku_id, p.category, p.sub_category, p.criticality_score")
             sql_parts.append("ORDER BY avg_weekly DESC")
 
             sql = "\n".join(sql_parts)
@@ -263,31 +271,24 @@ class StockAdvisorAgent:
         self, db: Session, target_skus: list, category: str,
         target_month: int, target_year: int,
     ) -> list[dict]:
-        """Query the forecasts table for predicted_demand in the target month.
-
-        If the target month has no data (dataset may be historical), try the
-        same month in the most recent year that has data.  Returns [] when no
-        forecast data exists at all, allowing the EWMA fallback to kick in.
-        """
-        target_ym = f"{target_year}-{target_month:02d}"
+        """Query the forecasts table for predicted_demand in the target month."""
+        start_date = date(target_year, target_month, 1)
+        # End date is start of next month
+        if target_month == 12:
+            end_date = date(target_year + 1, 1, 1)
+        else:
+            end_date = date(target_year, target_month + 1, 1)
 
         # Check if target month exists
         r = db.execute(text(
             "SELECT COUNT(*) FROM forecasts "
-            "WHERE strftime('%Y-%m', forecast_date) = :ym"
-        ), {"ym": target_ym})
+            "WHERE forecast_date >= :start_date AND forecast_date < :end_date"
+        ), {"start_date": start_date, "end_date": end_date})
         count = r.scalar() or 0
 
         if count == 0:
-            # Try the same month in the most recent available year
-            r2 = db.execute(text(
-                "SELECT MAX(strftime('%Y-%m', forecast_date)) "
-                "FROM forecasts WHERE strftime('%m', forecast_date) = :mm"
-            ), {"mm": f"{target_month:02d}"})
-            alt = r2.scalar()
-            if not alt:
-                return []  # no forecast data for this month at all; EWMA will handle it
-            target_ym = alt
+            # Fallback to EWMA
+            return []
 
         sql_parts = [
             "SELECT f.sku_id, p.category, SUM(f.predicted_demand) AS monthly_demand,",
@@ -297,9 +298,9 @@ class StockAdvisorAgent:
             "JOIN products p ON f.product_id = p.id",
         ]
         conditions = [
-            "strftime('%Y-%m', f.forecast_date) = :target_ym",
+            "f.forecast_date >= :start_date AND f.forecast_date < :end_date",
         ]
-        params = {"target_ym": target_ym}
+        params = {"start_date": start_date, "end_date": end_date}
 
         if target_skus:
             placeholders = ", ".join(f"'{s}'" for s in target_skus)
@@ -309,7 +310,7 @@ class StockAdvisorAgent:
             params["cat"] = category
 
         sql_parts.append("WHERE " + " AND ".join(conditions))
-        sql_parts.append("GROUP BY f.sku_id")
+        sql_parts.append("GROUP BY f.sku_id, p.category")
         sql_parts.append("ORDER BY monthly_demand DESC")
 
         sql = "\n".join(sql_parts)
@@ -339,16 +340,24 @@ class StockAdvisorAgent:
             max_sale_date = max_date_result.scalar()
             if max_sale_date is None:
                 return []
-            max_sale_date_str = str(max_sale_date)[:10]
+            
+            if isinstance(max_sale_date, str):
+                max_dt = pd.to_datetime(max_sale_date).date()
+            elif hasattr(max_sale_date, "date"):
+                max_dt = max_sale_date.date()
+            else:
+                max_dt = max_sale_date
+
+            cutoff_date = max_dt - timedelta(days=56)
 
             # Get recent sales for the target SKUs (8 weeks before latest sale)
             sql_parts = [
                 "SELECT s.sku_id, p.category, s.sale_date, s.units_sold",
                 "FROM sales s",
                 "JOIN products p ON s.product_id = p.id",
-                f"WHERE s.sale_date >= DATE(:max_date, '-56 days')",
+                "WHERE s.sale_date >= :cutoff_date",
             ]
-            params = {"max_date": max_sale_date_str}
+            params = {"cutoff_date": cutoff_date}
             if target_skus:
                 placeholders = ", ".join(f"'{s}'" for s in target_skus)
                 sql_parts.append(f"AND s.sku_id IN ({placeholders})")
@@ -361,6 +370,7 @@ class StockAdvisorAgent:
             rows = [dict(row._mapping) for row in result.fetchall()]
             if not rows:
                 return []
+
 
             df = pd.DataFrame(rows)
             df["sale_date"] = pd.to_datetime(df["sale_date"])
