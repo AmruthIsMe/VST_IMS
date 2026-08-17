@@ -13,6 +13,8 @@ from sqlalchemy import text
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
+from app.forecasting.constants import SKU_CATEGORY_PREFIX
+
 
 def load_sales_data(db: Session = None) -> pd.DataFrame:
     """Load sales data from DB or CSV fallback."""
@@ -69,15 +71,8 @@ def get_category_for_sku(sku_id: str, products_df: pd.DataFrame = None) -> str:
         if len(match) > 0:
             return match.iloc[0]["Category"]
 
-    prefix_map = {
-        "SP": "Spare Parts",
-        "LU": "Lubricants",
-        "EP": "Electric Pumps",
-        "EN": "Engines",
-        "PC": "Precision Components",
-    }
     prefix = sku_id[:2] if len(sku_id) >= 2 else ""
-    return prefix_map.get(prefix, "Unknown")
+    return SKU_CATEGORY_PREFIX.get(prefix, "Unknown")
 
 
 def engineer_features(df: pd.DataFrame, external_df: pd.DataFrame = None) -> pd.DataFrame:

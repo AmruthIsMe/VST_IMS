@@ -7,7 +7,7 @@ import json
 
 class Settings(BaseSettings):
     APP_NAME: str = "VST IMS API"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # Database: defaults to local SQLite; override with env var for cloud PostgreSQL
     DATABASE_URL: str = f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(__file__)), 'vst_ims.db').replace(chr(92), '/')}"
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    CORS_ORIGINS: list[str] = ["*", "http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     SAP_HOST: str = ""
     SAP_SYSNR: str = "00"

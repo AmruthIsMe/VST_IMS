@@ -31,7 +31,7 @@ TOOLS = {
         "description": "Identify items at risk of shelf-life expiry.",
     },
     "supplier_failure": {
-        "keywords": ["supplier fail", "can't deliver", "unavailable", "disruption", "shutdown"],
+        "keywords": ["supplier fail", "can't deliver", "unavailable", "disruption", "shutdown", "shut down", "shut"],
         "description": "Simulate what happens if a supplier/country is unavailable for X weeks.",
     },
 }

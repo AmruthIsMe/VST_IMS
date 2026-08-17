@@ -148,8 +148,11 @@ class GenieEngine:
             response_text = self._synthesize_multi(
                 sanitized, combined_text_parts, trace
             )
+        elif trace:
+            # Agents ran but produced no text — build a useful fallback from trace data
+            response_text = self._trace_fallback(sanitized, trace, primary)
         else:
-            # No agents produced data — try Gemini as general assistant
+            # No agents invoked at all — general assistant
             response_text = self._general_response(sanitized, db)
 
         # ── Step 5: Output guardrails ──────────────────────────────
@@ -194,18 +197,18 @@ class GenieEngine:
     def get_suggestions(self, db: Session = None) -> list[dict]:
         """Quick-action suggestions for the chat UI."""
         return [
-            {"text": "Do we need to order more Spare Parts for December?",
-             "query": "Do we need to order more stocks for Spare Parts for December?"},
-            {"text": "Show inventory summary by category",
-             "query": "How many SKUs are there per category?"},
-            {"text": "What if lead time from China increases by 15 days?",
-             "query": "What if lead time from China increases by 15 days?"},
-            {"text": "Which items are at risk of expiring?",
-             "query": "Which items are at risk of shelf-life expiry?"},
-            {"text": "Show Japanese suppliers and lead times",
-             "query": "Show me all suppliers from Japan and their lead times"},
-            {"text": "Do we need to order more Electric Pumps for next month?",
-             "query": "Do we need to order more Electric Pumps for next month?"},
+            {"text": "Which SKUs will stock out in the next 8 weeks?",
+             "query": "Which SKUs will stock out in the next 8 weeks?"},
+            {"text": "What's the total inventory value across all categories?",
+             "query": "What's the total inventory value across all categories?"},
+            {"text": "What if a major supplier from Japan shuts down for 6 weeks?",
+             "query": "What if a major supplier from Japan shuts down for 6 weeks?"},
+            {"text": "Show top 10 highest-demand Spare Parts this month",
+             "query": "Show me the top 10 highest-demand Spare Parts this month"},
+            {"text": "Which Electric Pumps need urgent reorder?",
+             "query": "Which Electric Pumps need urgent reorder?"},
+            {"text": "Compare avg lead times across all supplier countries",
+             "query": "Compare average lead times across all supplier countries"},
         ]
 
     # ── Agent runners ───────────────────────────────────────────────
@@ -240,6 +243,8 @@ class GenieEngine:
                 primary = plan.get("primary", agents[0] if agents else "sql")
                 if agents:
                     return {"agents": agents, "primary": primary}
+                # Gemini returned empty agents — fall through to rule-based
+                logger.warning("Gemini planner returned empty agents, using rule-based")
             except Exception as e:
                 logger.warning("Planner LLM failed: %s", e)
 
@@ -252,7 +257,8 @@ class GenieEngine:
         # What-if / scenario
         if any(kw in q for kw in ["what if", "what happens if", "simulate", "scenario",
                                     "if lead time", "if demand", "if supplier fail",
-                                    "impact of", "suppose", "assume"]):
+                                    "if a major", "impact of", "suppose", "assume",
+                                    "shut down", "disruption", "fails for"]):
             return {"agents": ["what_if"], "primary": "what_if"}
 
         # Stock advisor (reorder / month-ahead questions)
@@ -265,6 +271,7 @@ class GenieEngine:
             "next month", "next week", "how many should we order",
             "shortfall", "shortage", "stockout risk",
             "do we need", "will it stock out",
+            "stock out", "stockout", "urgent reorder", "run short",
         ]):
             return {"agents": ["stock_advisor"], "primary": "stock_advisor"}
 
@@ -273,6 +280,8 @@ class GenieEngine:
             "how many", "what is", "show me", "list", "count",
             "average", "total", "which", "who", "what's the",
             "what are", "describe", "give me", "find",
+            "compare", "top 10", "highest", "lowest",
+            "inventory value", "lead time", "suppliers from",
         ]):
             return {"agents": ["sql"], "primary": "sql"}
 
@@ -302,6 +311,52 @@ class GenieEngine:
 
         # Fallback: concatenate the largest part
         return combined
+
+    def _trace_fallback(self, message: str, trace: dict, primary: str) -> str:
+        """Build a useful response when agents ran but produced no summary text."""
+        parts = []
+
+        # SQL agent ran
+        sql = trace.get("sql", {})
+        if sql:
+            rows = sql.get("rows", [])
+            if sql.get("error"):
+                return f"I tried to query the database but encountered an error: {sql['error']}"
+            if rows:
+                cols = sql.get("columns", list(rows[0].keys()) if rows else [])
+                header = "| " + " | ".join(cols) + " |"
+                sep = "| " + " | ".join(["---"] * len(cols)) + " |"
+                body = [header, sep]
+                for row in rows[:15]:
+                    vals = [str(row.get(c, "")) for c in cols]
+                    body.append("| " + " | ".join(vals) + " |")
+                return "\n".join(body)
+            return "I queried the database but found no matching results for your question."
+
+        # Stock advisor ran
+        sa = trace.get("stock_advisor", {})
+        if sa:
+            math_result = sa.get("math", {})
+            need = math_result.get("skus_needing_reorder", 0)
+            total = math_result.get("total_recommended_units", 0)
+            if need > 0:
+                return (
+                    f"Based on current inventory and forecasts, "
+                    f"**{need} SKU(s)** may run short by a total of **{total} units**. "
+                    f"Check the reasoning trace below for the full breakdown."
+                )
+            return "Current inventory levels look adequate based on the analysis. No urgent reorders needed."
+
+        # What-if ran
+        wi = trace.get("what_if", {})
+        if wi:
+            result = wi.get("result", {})
+            if result.get("error"):
+                return f"What-if simulation error: {result['error']}"
+            tool = wi.get("tool", "scenario")
+            return f"What-if simulation completed for **{tool}**. Check the reasoning trace for details."
+
+        return "I analyzed your question but couldn't generate a summary. Please try rephrasing."
 
     def _general_response(self, message: str, db: Session = None) -> str:
         """Handle greetings, help, and unrecognised questions."""

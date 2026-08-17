@@ -67,25 +67,12 @@ export default function Dashboard() {
     value: trend.values[idx] || 0,
   }));
 
-  const displayTrendData = trendData.length >= 2 ? trendData : [
-    { name: 'Oct 06', value: 4840 }, { name: 'Oct 20', value: 4890 },
-    { name: 'Nov 03', value: 6220 }, { name: 'Nov 17', value: 6480 },
-    { name: 'Dec 01', value: 5880 }, { name: 'Dec 15', value: 6000 },
-    { name: 'Dec 29', value: 5990 },
-  ];
-
   const pieData = (categories?.labels || []).map((label, idx) => ({
     name: label === 'Precision Components' ? 'Precision Comp.' : label,
     value: categories.values[idx],
   }));
 
-  const displayPieData = pieData.length > 0 ? pieData : [
-    { name: 'Spare Parts', value: 52.6 }, { name: 'Lubricants', value: 30.2 },
-    { name: 'Electric Pumps', value: 12.0 }, { name: 'Engines', value: 3.2 },
-    { name: 'Precision Comp.', value: 2.0 },
-  ];
-
-  const totalPieValue = displayPieData.reduce((sum, d) => sum + d.value, 0);
+  const totalPieValue = pieData.reduce((sum, d) => sum + d.value, 0);
 
   // Filter risk table
   const filteredRisks = useMemo(() => {
@@ -118,23 +105,21 @@ export default function Dashboard() {
           <div className="kpi-card">
             <div className="kpi-top-row">
               <div className="kpi-icon-box kpi-icon-green"><DollarSign size={22} /></div>
-              <span className="kpi-badge kpi-badge-green">+4.2%</span>
             </div>
             <div>
               <div className="kpi-label">Total Inventory Value</div>
-              <div className="kpi-value kpi-value-green">₹42,80,25,622</div>
-              <div className="kpi-sub">Across all 5 categories</div>
+              <div className="kpi-value kpi-value-green">₹{kpis?.total_inventory_value?.toLocaleString('en-IN') || '—'}</div>
+              <div className="kpi-sub">Across all {kpis?.total_skus || 0} SKUs</div>
             </div>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-top-row">
               <div className="kpi-icon-box kpi-icon-green"><Package size={22} /></div>
-              <span className="kpi-badge kpi-badge-green">+2.1%</span>
             </div>
             <div>
               <div className="kpi-label">Total Units In Stock</div>
-              <div className="kpi-value">58,255</div>
+              <div className="kpi-value">{kpis?.total_units_in_stock?.toLocaleString('en-IN') || '—'}</div>
               <div className="kpi-sub">Current physical count</div>
             </div>
           </div>
@@ -154,11 +139,11 @@ export default function Dashboard() {
           <div className="kpi-card">
             <div className="kpi-top-row">
               <div className="kpi-icon-box kpi-icon-blue"><FileText size={22} /></div>
-              <span className="kpi-badge kpi-badge-green">{summary.total_skus_analyzed || 200} SKUs</span>
+              <span className="kpi-badge kpi-badge-green">{summary.total_skus_analyzed || 0} SKUs</span>
             </div>
             <div>
               <div className="kpi-label">SKUs Analyzed</div>
-              <div className="kpi-value">{summary.total_skus_analyzed ?? 200}</div>
+              <div className="kpi-value">{summary.total_skus_analyzed ?? 0}</div>
               <div className="kpi-sub">12-week forecast horizon</div>
             </div>
           </div>
@@ -205,7 +190,7 @@ export default function Dashboard() {
               </div>
             </div>
             <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={displayTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#107c41" stopOpacity={0.25} />
@@ -215,7 +200,7 @@ export default function Dashboard() {
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#667085' }} />
                 <YAxis tick={{ fontSize: 11, fill: '#667085' }} />
                 <Tooltip />
-                <Area type="monotone" dataKey="value" stroke="#107c41" strokeWidth={2.5} fillOpacity={1} fill="url(#colorValue)" dot={displayTrendData.length < 30 ? { r: 3, fill: '#107c41' } : false} />
+                <Area type="monotone" dataKey="value" stroke="#107c41" strokeWidth={2.5} fillOpacity={1} fill="url(#colorValue)" dot={trendData.length < 30 ? { r: 3, fill: '#107c41' } : false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -230,7 +215,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={displayPieData}
+                  data={pieData}
                   cx="50%"
                   cy="45%"
                   innerRadius={60}
@@ -240,7 +225,7 @@ export default function Dashboard() {
                   label={renderPieLabel}
                   labelLine={{ strokeWidth: 1, stroke: '#d0d5dd' }}
                 >
-                  {displayPieData.map((entry, index) => (
+                  {pieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.name] || '#2b6cb0'} />
                   ))}
                 </Pie>
@@ -361,7 +346,7 @@ export default function Dashboard() {
 
           {/* Table */}
           {riskLoading ? (
-            <div className="loading"><RefreshCw size={20} className="spin" style={{ marginRight: 8 }} />Analyzing 200 SKUs...</div>
+            <div className="loading"><RefreshCw size={20} className="spin" style={{ marginRight: 8 }} />Analyzing SKUs...</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -372,7 +357,7 @@ export default function Dashboard() {
                   <th>Avg Demand/Wk</th>
                   <th>Forecast/Wk</th>
                   <th>Trend</th>
-                  <th>Est. Stock</th>
+                  <th>Current InHand Stock</th>
                   <th>Coverage</th>
                   <th>12-Wk Demand</th>
                   <th>Shortfall</th>

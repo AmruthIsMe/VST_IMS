@@ -4,7 +4,7 @@ import { getProducts, createProduct, updateProduct, deleteProduct, getCategories
 import Header from '../components/Header';
 import { Box, Layers, CheckCircle2, AlertTriangle, XCircle, Search, Plus, Eye, Pencil, Trash2, ArrowLeft, Package, Wrench, Droplets, Cog, Cpu, Settings2 } from 'lucide-react';
 
-const EMPTY = { sku_id: '', category: 'Spare Parts', sub_category: '', machine_compatibility: '', shelf_life_days: '', unit_volume_m3: '', criticality_score: '0.5' };
+const EMPTY = { sku_id: '', category: 'Spare Parts', sub_category: '', machine_compatibility: '', shelf_life_days: '', unit_volume_m3: '' };
 
 const CATEGORY_DATA = [
   {
@@ -67,7 +67,7 @@ export default function Products() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['products', page, search, catFilter],
-    queryFn: () => getProducts({ page, page_size: 15, search, category: catFilter }).then(r => r.data),
+    queryFn: () => getProducts({ page, page_size: 25, search, category: catFilter }).then(r => r.data),
   });
 
   const { data: cats } = useQuery({
@@ -99,12 +99,32 @@ export default function Products() {
 
   const allProducts = allProductsData?.items || [];
 
-  // Status classification based on criticality_score (1-5 scale):
-  //   1-2 = Healthy, 3-4 = Low Stock, 5 = Critical
+  // Category-aware stock thresholds: below low = Critical, below medium = Low, else Healthy
+  const STOCK_THRESHOLDS = {
+    'Spare Parts':          { low: 200, medium: 500 },
+    'Lubricants':           { low: 150, medium: 400 },
+    'Electric Pumps':       { low: 20,  medium: 50 },
+    'Engines':              { low: 5,   medium: 15 },
+    'Precision Components': { low: 10,  medium: 25 },
+  };
+
+  const getThresholds = (category) => STOCK_THRESHOLDS[category] || { low: 50, medium: 200 };
+
+  // Status classification based on actual inventory (current_stock) with category-aware thresholds
   const statusMap = {
-    Healthy: (p) => p.criticality_score == null || p.criticality_score < 3,
-    Low: (p) => p.criticality_score != null && p.criticality_score >= 3 && p.criticality_score < 5,
-    Critical: (p) => p.criticality_score != null && p.criticality_score >= 5,
+    Healthy: (p) => {
+      const t = getThresholds(p.category);
+      return (p.current_stock || 0) >= t.medium;
+    },
+    Low: (p) => {
+      const t = getThresholds(p.category);
+      const stock = p.current_stock || 0;
+      return stock >= t.low && stock < t.medium;
+    },
+    Critical: (p) => {
+      const t = getThresholds(p.category);
+      return (p.current_stock || 0) < t.low;
+    },
   };
 
   const filteredProducts = allProducts.filter((p) => {
@@ -118,12 +138,24 @@ export default function Products() {
   const lowCriticalCount = filteredProducts.filter(statusMap.Low).length;
   const criticalCount = filteredProducts.filter(statusMap.Critical).length;
 
-  // Also apply status filter to the table items (client-side since backend doesn't support status filter)
-  const displayedItems = useMemo(() => {
-    const items = data?.items || [];
-    if (!statusFilter) return items;
-    return items.filter((p) => statusMap[statusFilter]?.(p));
-  }, [data?.items, statusFilter]);
+  const PAGE_SIZE = 25;
+
+  // When status filter is active, use allProducts (all items) with client-side pagination
+  // When no filter, use server-side paginated data
+  const { displayedItems, totalShowing } = useMemo(() => {
+    if (statusFilter || catFilter) {
+      const filtered = filteredProducts;
+      const start = (page - 1) * PAGE_SIZE;
+      return {
+        displayedItems: filtered.slice(start, start + PAGE_SIZE),
+        totalShowing: filtered.length,
+      };
+    }
+    return {
+      displayedItems: data?.items || [],
+      totalShowing: data?.total || 0,
+    };
+  }, [data, filteredProducts, statusFilter, catFilter, page]);
 
   // Sub-category count lookup from allProducts
   const subCategoryCountMap = useMemo(() => {
@@ -166,18 +198,18 @@ export default function Products() {
     return 'badge-precision';
   };
 
-  const getStatusBadge = (score) => {
-    if (score == null) return <span className="badge-pill badge-healthy">Healthy</span>;
-    if (score >= 5) return <span className="badge-pill badge-critical">Critical</span>;
-    if (score >= 3) return <span className="badge-pill badge-low">Low Stock</span>;
-    return <span className="badge-pill badge-healthy">Healthy</span>;
+  const getStockColor = (category, qty) => {
+    const t = getThresholds(category);
+    if (qty < t.low) return '#dc2626';
+    if (qty < t.medium) return '#d97706';
+    return '#16a34a';
   };
 
-  const getCriticalityLabel = (score) => {
-    if (score == null) return '—';
-    if (score <= 2) return `${score} — Low`;
-    if (score <= 4) return `${score} — Medium`;
-    return `${score} — High`;
+  const getStockBadge = (category, qty) => {
+    const t = getThresholds(category);
+    if (qty < t.low) return <span className="badge-pill badge-critical">Low</span>;
+    if (qty < t.medium) return <span className="badge-pill badge-low">Medium</span>;
+    return <span className="badge-pill badge-healthy">Healthy</span>;
   };
 
   const handleCategoryClick = (cat) => {
@@ -295,9 +327,9 @@ export default function Products() {
 
                 <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
                   <option value="">All Statuses</option>
-                  <option value="Healthy">Healthy (Score 1–2)</option>
-                  <option value="Low">Low Stock (Score 3–4)</option>
-                  <option value="Critical">Critical (Score 5)</option>
+                  <option value="Healthy">Healthy</option>
+                  <option value="Low">Low Stock</option>
+                  <option value="Critical">Critical</option>
                 </select>
               </div>
 
@@ -311,7 +343,7 @@ export default function Products() {
               <div className="table-card-header">
                 <div className="table-card-title">Product Master List</div>
                 <div className="showing-count">
-                  Showing <strong>{displayedItems.length}</strong> of <strong>{data?.total || 0}</strong> SKUs
+                  Showing <strong>{displayedItems.length}</strong> of <strong>{totalShowing}</strong> SKUs
                   {statusFilter && <span style={{ color: '#6366f1', marginLeft: 8 }}>(filtered by {statusFilter})</span>}
                 </div>
               </div>
@@ -320,20 +352,22 @@ export default function Products() {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th style={{ width: 60 }}>SL NO</th>
                       <th>SKU ID</th>
                       <th>Category</th>
                       <th>Sub-Category</th>
                       <th>Machine Compatibility</th>
                       <th>Shelf Life</th>
                       <th>Volume (m³)</th>
-                      <th>Criticality</th>
+                      <th>Current Stock</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedItems.map((p) => (
+                    {displayedItems.map((p, idx) => (
                       <tr key={p.id}>
+                        <td style={{ color: '#94a3b8', fontWeight: 600 }}>{(page - 1) * PAGE_SIZE + idx + 1}</td>
                         <td style={{ fontWeight: 600, color: '#334155' }}>{p.sku_id}</td>
                         <td>
                           <span className={`badge-pill ${getCategoryClass(p.category)}`}>
@@ -350,10 +384,10 @@ export default function Products() {
                         <td style={{ color: '#64748b', fontFamily: 'monospace' }}>
                           {p.unit_volume_m3 != null ? p.unit_volume_m3.toFixed(4) : '—'}
                         </td>
-                        <td style={{ fontWeight: 600, color: p.criticality_score >= 5 ? '#dc2626' : p.criticality_score >= 3 ? '#d97706' : '#16a34a' }}>
-                          {getCriticalityLabel(p.criticality_score)}
+                        <td style={{ fontWeight: 600, fontFamily: 'monospace', color: getStockColor(p.category, p.current_stock || 0) }}>
+                          {p.current_stock != null ? p.current_stock.toLocaleString('en-IN') : '—'}
                         </td>
-                        <td>{getStatusBadge(p.criticality_score)}</td>
+                        <td>{getStockBadge(p.category, p.current_stock || 0)}</td>
                         <td>
                           <div className="action-buttons">
                             <button className="act-btn act-view"><Eye size={13} /> View</button>
@@ -367,15 +401,19 @@ export default function Products() {
                 </table>
               )}
 
-              {data && data.total_pages > 1 && (
-                <div className="pagination-container">
-                  <button className="page-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
-                  {Array.from({ length: Math.min(data.total_pages, 5) }, (_, i) => i + 1).map((p) => (
-                    <button key={p} className={`page-btn ${p === page ? 'active' : ''}`} onClick={() => setPage(p)}>{p}</button>
-                  ))}
-                  <button className="page-btn" disabled={page >= data.total_pages} onClick={() => setPage(page + 1)}>Next</button>
-                </div>
-              )}
+              {(() => {
+                const totalPages = Math.ceil(totalShowing / PAGE_SIZE);
+                if (totalPages <= 1) return null;
+                return (
+                  <div className="pagination-container">
+                    <button className="page-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</button>
+                    {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map((p) => (
+                      <button key={p} className={`page-btn ${p === page ? 'active' : ''}`} onClick={() => setPage(p)}>{p}</button>
+                    ))}
+                    <button className="page-btn" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</button>
+                  </div>
+                );
+              })()}
             </div>
           </>
         )}

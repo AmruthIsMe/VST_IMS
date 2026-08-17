@@ -82,30 +82,20 @@ export default function Suppliers() {
               <tbody>
                 {(data?.items || []).map((s, idx) => {
                   const sNo = String(idx + 1).padStart(2, '0');
-                  const emails = ['procurement@acer-tech.in', 'india-supply@dell.com', 'supply.chain@bosch.in', 'bearings@skfindia.com'];
-                  const phones = ['+91-80-4102-3300', '+91-44-6740-8000', '+91-80-2295-3000', '+91-20-6702-6300'];
-                  const addresses = [
-                    'Plot 14, Electronics City Phase 1, Bengaluru – 560100, Karnataka',
-                    'DLF Cybercity, Manapakkam, Chennai – 600089, Tamil Nadu',
-                    'Adugodi, Hosur Road, Bengaluru – 560030, Karnataka',
-                    'Mundhwa Industrial Area, Pune – 411036, Maharashtra',
-                  ];
-
-                  const email = s.email || emails[idx % emails.length];
-                  const phone = s.phone || phones[idx % phones.length];
-                  const address = s.address || addresses[idx % addresses.length];
 
                   return (
                     <tr key={s.id}>
                       <td style={{ color: '#94a3b8', fontWeight: 600 }}>{sNo}</td>
                       <td style={{ fontWeight: 700, color: '#1e293b' }}>{s.supplier_name}</td>
                       <td>
-                        <a href={`mailto:${email}`} style={{ color: '#0284c7', textDecoration: 'none' }}>
-                          {email}
-                        </a>
+                        {s.email ? (
+                          <a href={`mailto:${s.email}`} style={{ color: '#0284c7', textDecoration: 'none' }}>
+                            {s.email}
+                          </a>
+                        ) : <span style={{ color: '#d0d5dd' }}>Not provided</span>}
                       </td>
-                      <td style={{ color: '#475569' }}>{phone}</td>
-                      <td style={{ color: '#475569', maxWidth: 360 }}>{address}</td>
+                      <td style={{ color: s.phone ? '#475569' : '#d0d5dd' }}>{s.phone || 'Not provided'}</td>
+                      <td style={{ color: s.address ? '#475569' : '#d0d5dd', maxWidth: 360 }}>{s.address || 'Not provided'}</td>
                       <td>
                         <div className="action-buttons">
                           <button className="act-btn act-edit" onClick={() => openEdit(s)}>

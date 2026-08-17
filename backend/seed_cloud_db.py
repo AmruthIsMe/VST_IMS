@@ -1,14 +1,13 @@
 """
-VST IMS — One-Time Cloud Database Seeder
+VST IMS — Database Seeder
 
-Seeds the Supabase PostgreSQL database with initial data from CSV files.
-Run this ONCE after creating the Supabase database.
+Seeds the database with initial data from CSV files.
+Supports both local SQLite and cloud PostgreSQL.
 
 Usage:
     cd backend
-    python seed_cloud_db.py
-
-Reads CLOUD_DATABASE_URL from backend/.env
+    python seed_cloud_db.py              # seeds local SQLite (default)
+    python seed_cloud_db.py --cloud      # seeds cloud Supabase PostgreSQL
 """
 
 import os
@@ -33,17 +32,27 @@ import numpy as np
 DATA_DIR = BACKEND_DIR.parent / "data"
 
 
-def load_db_url():
-    """Load the cloud DATABASE_URL."""
+def load_db_url(cloud_mode=False):
+    """Load the database URL. Cloud mode uses CLOUD_DATABASE_URL, local uses SQLite."""
     from dotenv import load_dotenv
     load_dotenv(BACKEND_DIR / ".env")
-    
-    url = os.getenv("CLOUD_DATABASE_URL") or os.getenv("DATABASE_URL")
-    if not url or url.startswith("sqlite"):
-        print("\n⚠️  No cloud DATABASE_URL found!")
-        print("   Add CLOUD_DATABASE_URL=postgresql://... to backend/.env")
-        sys.exit(1)
-    return url
+
+    if cloud_mode:
+        url = os.getenv("CLOUD_DATABASE_URL") or os.getenv("DATABASE_URL")
+        if not url or url.startswith("sqlite"):
+            print("\n⚠️  No cloud DATABASE_URL found!")
+            print("   Add CLOUD_DATABASE_URL=postgresql://... to backend/.env")
+            sys.exit(1)
+        return url
+
+    # Local mode: use SQLite
+    url = os.getenv("DATABASE_URL")
+    if url and not url.startswith("sqlite"):
+        print(f"\n   Using DATABASE_URL from env: {url[:50]}...")
+        return url
+
+    sqlite_path = BACKEND_DIR / "vst_ims.db"
+    return f"sqlite:///{str(sqlite_path).replace(chr(92), '/')}"
 
 
 def create_tables(engine):
@@ -55,11 +64,11 @@ def create_tables(engine):
     from app.models import (
         Product, Supplier, User, Order, OrderItem, Sale,
         ExternalFactor, Forecast, ForecastModel, ForecastPrediction,
-        SapSyncLog, SapConfig, GenieConversation, GenieMessage,
+        SapSyncLog, SapConfig, GenieConversation, GenieMessage, Inventory,
     )
     
     Base.metadata.create_all(bind=engine)
-    print("   ✅ All 14 tables created")
+    print("   ✅ All 15 tables created")
 
 
 def seed_products(conn):
@@ -274,33 +283,81 @@ def seed_forecasts(conn):
     print(f"   ✅ {len(records)} forecast records seeded")
 
 
+def seed_inventory(conn):
+    """
+    Seed inventory with realistic stock levels per category.
+    Stock ranges are based on typical warehouse operations:
+      - Spare Parts (SP): high volume, 200–2000 units
+      - Lubricants (LU): bulk items, 150–1500 units
+      - Electric Pumps (EP): medium, 20–150 units
+      - Engines (EN): low volume, high value, 5–40 units
+      - Precision Components (PC): low volume, 10–80 units
+    """
+    import random
+    random.seed(42)
+
+    from sqlalchemy import text
+    prod_rows = conn.execute(text("SELECT sku_id, category FROM products")).fetchall()
+
+    category_ranges = {
+        "Spare Parts":        (200, 2000),
+        "Lubricants":         (150, 1500),
+        "Electric Pumps":     (20, 150),
+        "Engines":            (5, 40),
+        "Precision Components": (10, 80),
+    }
+
+    now = datetime.utcnow()
+    records = []
+    for sku_id, category in prod_rows:
+        lo, hi = category_ranges.get(category, (50, 500))
+        on_hand = random.randint(lo, hi)
+        reserved = random.randint(0, int(on_hand * 0.3))
+        available = on_hand - reserved
+        records.append({
+            "id": str(uuid.uuid4()),
+            "sku_id": sku_id,
+            "quantity_on_hand": on_hand,
+            "quantity_reserved": reserved,
+            "quantity_available": available,
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    pd.DataFrame(records).to_sql("inventory", conn, if_exists="append", index=False, method="multi")
+    print(f"   ✅ {len(records)} inventory records seeded")
+
+
 def main():
+    cloud_mode = "--cloud" in sys.argv
+
+    mode_label = "Cloud PostgreSQL" if cloud_mode else "Local SQLite"
     print("\n" + "🌱" * 20)
-    print("  VST IMS — Cloud Database Seeder")
+    print(f"  VST IMS — Database Seeder ({mode_label})")
     print("🌱" * 20)
-    
-    db_url = load_db_url()
-    print(f"\n   🔗 Cloud DB: {db_url[:50]}...")
-    
+
+    db_url = load_db_url(cloud_mode=cloud_mode)
+    print(f"\n   🔗 DB: {db_url[:60]}...")
+
     from sqlalchemy import create_engine, text
     engine = create_engine(db_url, pool_pre_ping=True)
-    
+
     # Test connection
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        print("   ✅ Connected to cloud database!")
+        print("   ✅ Connected to database!")
     except Exception as e:
         print(f"   ❌ Connection failed: {e}")
         sys.exit(1)
-    
+
     # Create tables
     create_tables(engine)
-    
+
     # Clean existing data before seeding to ensure consistent state
     with engine.connect() as conn:
         print("   🗑️  Resetting tables for clean seed...")
-        for table in ["forecast_predictions", "forecast_models", "forecasts", "genie_messages",
+        for table in ["inventory", "forecast_predictions", "forecast_models", "forecasts", "genie_messages",
                      "genie_conversations", "sap_sync_log", "sap_config", "order_items",
                      "orders", "sales", "external_factors", "suppliers", "users", "products"]:
             try:
@@ -309,7 +366,7 @@ def main():
                 pass
         conn.commit()
 
-    
+
     # Seed each table
     with engine.connect() as conn:
         seed_products(conn)
@@ -324,23 +381,29 @@ def main():
         conn.commit()
         seed_forecasts(conn)
         conn.commit()
-    
+        seed_inventory(conn)
+        conn.commit()
+
     print("\n" + "=" * 60)
     print("  🎉  DATABASE SEEDED SUCCESSFULLY!")
     print("=" * 60)
     print(f"  Tables populated:")
-    
+
     with engine.connect() as conn:
-        for table in ["products", "suppliers", "users", "sales", "external_factors", "forecasts"]:
+        for table in ["products", "suppliers", "users", "sales", "external_factors", "forecasts", "inventory"]:
             try:
                 count = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).fetchone()[0]
                 print(f"    {table:25s} {count:>8,} rows")
             except Exception:
                 print(f"    {table:25s} (error)")
-    
+
     print("\n  Next steps:")
-    print("  1. Deploy backend to Render")
-    print("  2. Run train_and_upload.py to generate ML predictions")
+    if cloud_mode:
+        print("  1. Deploy backend to Render")
+        print("  2. Run train_and_upload.py to generate ML predictions")
+    else:
+        print("  1. Restart the backend: uvicorn app.main:app --reload")
+        print("  2. Visit http://localhost:8000/docs to explore the API")
     print("=" * 60 + "\n")
 
 

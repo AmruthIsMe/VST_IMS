@@ -1476,6 +1476,16 @@ body {
   color: var(--primary);
   background: var(--primary-bg);
 }
+.genie-bubble-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0 4px 0;
+  border-bottom: none;
+}
+.genie-export-top {
+  position: relative;
+  z-index: 1;
+}
 
 /* ── Scrollable trace tables (for large SKU lists) ────────────── */
 .genie-table-scroll {

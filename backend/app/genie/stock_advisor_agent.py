@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from app.genie.sql_agent import get_sql_agent
 from app.genie.llm_client import get_gemini_model
 from app.forecasting.data_pipeline import load_products_data, load_sales_data
+from app.forecasting.constants import get_risk_level
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,6 @@ class StockAdvisorAgent:
                     "sku_id": r["sku_id"],
                     "category": r["category"],
                     "sub_category": r.get("sub_category", ""),
-                    "criticality": float(r.get("criticality_score") or 0.5),
                     "avg_weekly_demand": round(avg_weekly, 1),
                     "total_units_13w": int(r["total_units_13w"] or 0),
                     "weeks_active": int(r["weeks_active"] or 0),
@@ -439,13 +439,7 @@ class StockAdvisorAgent:
 
             shortfall = max(0, round(monthly_demand - estimated_stock))
             recommend = shortfall  # raw; MOQ rounding done in response
-            urgency = "LOW"
-            if coverage_weeks < 4 or shortfall > 0:
-                urgency = "CRITICAL"
-            elif coverage_weeks < 8:
-                urgency = "HIGH"
-            elif coverage_weeks < 12:
-                urgency = "MEDIUM"
+            urgency = get_risk_level(coverage_weeks, 1.0, shortfall)
 
             total_shortfall += shortfall
             total_recommended += recommend
@@ -454,7 +448,6 @@ class StockAdvisorAgent:
                 "sku_id": sku_id,
                 "category": stock.get("category") or forecast.get("category", ""),
                 "sub_category": stock.get("sub_category", ""),
-                "criticality": stock.get("criticality", 0.5),
                 "current_stock": estimated_stock,
                 "avg_weekly_demand": round(avg_weekly, 1),
                 "coverage_weeks": round(coverage_weeks, 1),
@@ -465,7 +458,7 @@ class StockAdvisorAgent:
                 "urgency": urgency,
             })
 
-        results.sort(key=lambda x: (-x["shortfall"], -x["criticality"]))
+        results.sort(key=lambda x: (-x["shortfall"],))
 
         return {
             "skus": results,

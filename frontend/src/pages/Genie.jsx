@@ -184,22 +184,6 @@ export default function Genie() {
     const hasWhatIf = !!trace.what_if;
     if (!hasSql && !hasAdvisor && !hasWhatIf) return null;
 
-    const handleExport = async () => {
-      try {
-        const response = await exportGenieCsv(trace);
-        const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `genie_reorder_${new Date().toISOString().slice(0, 10)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-      } catch {
-        alert('Export failed. Please try again.');
-      }
-    };
-
     return (
       <div className="genie-trace">
         <button className="genie-trace-toggle" onClick={() => setExpanded(!expanded)}>
@@ -302,13 +286,6 @@ export default function Genie() {
               <div className="genie-trace-block">
                 <div className="genie-trace-header">
                   <span>Math — Shortfall Analysis</span>
-                  <button
-                    className="genie-export-btn"
-                    onClick={() => handleExport()}
-                    title="Download full reorder list as CSV"
-                  >
-                    <Download size={12} /> Export CSV
-                  </button>
                 </div>
                 <p className="genie-trace-meta">
                   {trace.stock_advisor.math.skus_needing_reorder} SKUs needing reorder &middot;{' '}
@@ -374,6 +351,35 @@ export default function Genie() {
     );
   };
 
+  /* ── Export button (shown at top of messages with tables) ──────── */
+  const ExportButton = ({ trace }) => {
+    if (!trace) return null;
+    const hasAdvisor = !!trace.stock_advisor;
+    if (!hasAdvisor) return null;
+
+    const handleExport = async () => {
+      try {
+        const response = await exportGenieCsv(trace);
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `genie_reorder_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+      } catch {
+        alert('Export failed. Please try again.');
+      }
+    };
+
+    return (
+      <button className="genie-export-btn genie-export-top" onClick={handleExport} title="Download reorder list as CSV">
+        <Download size={12} /> Export CSV
+      </button>
+    );
+  };
+
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="genie-page">
@@ -407,6 +413,11 @@ export default function Genie() {
                   <div className="genie-avatar-sm"><Sparkles size={14} /></div>
                 )}
                 <div className={`genie-bubble ${msg.role}`}>
+                  {msg.role === 'assistant' && msg.reasoning_trace && (
+                    <div className="genie-bubble-header">
+                      <ExportButton trace={msg.reasoning_trace} />
+                    </div>
+                  )}
                   <div className="genie-bubble-content">
                     {renderMarkdown(msg.content)}
                   </div>

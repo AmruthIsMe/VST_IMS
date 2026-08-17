@@ -218,10 +218,35 @@ Return ONLY the raw, executable SQL query. Do not wrap it in markdown formatting
         Gemini is unavailable."""
         q = question.lower().strip()
 
+        # inventory value by category
+        if "inventory value" in q or ("value" in q and "inventory" in q):
+            return ("SELECT p.category, "
+                    "COUNT(DISTINCT p.sku_id) AS skus, "
+                    "SUM(i.quantity_on_hand) AS total_units, "
+                    "ROUND(SUM(i.quantity_on_hand * i.unit_cost_inr), 2) AS inventory_value_inr "
+                    "FROM products p "
+                    "JOIN inventory i ON p.sku_id = i.sku_id "
+                    "GROUP BY p.category ORDER BY inventory_value_inr DESC;")
+
+        # top N highest demand items
+        if "top" in q and ("demand" in q or "highest" in q):
+            return ("SELECT s.sku_id, p.category, p.sub_category, "
+                    "ROUND(AVG(s.units_sold), 1) AS avg_weekly_demand "
+                    "FROM sales s JOIN products p ON s.product_id = p.id "
+                    "GROUP BY s.sku_id, p.category, p.sub_category "
+                    "ORDER BY avg_weekly_demand DESC LIMIT 10;")
+
+        # compare lead times
+        if "lead time" in q and ("compare" in q or "across" in q or "average" in q):
+            return ("SELECT origin_country, COUNT(*) AS supplier_count, "
+                    "ROUND(AVG(base_lead_time_days), 1) AS avg_lead_time_days, "
+                    "MIN(base_lead_time_days) AS min_lead_days, "
+                    "MAX(base_lead_time_days) AS max_lead_days "
+                    "FROM suppliers GROUP BY origin_country ORDER BY avg_lead_time_days;")
+
         # count SKUs by category
         if "sku" in q and ("count" in q or "how many sku" in q or "total sku" in q):
-            return ("SELECT category, COUNT(*) AS sku_count, "
-                    "ROUND(AVG(criticality_score), 2) AS avg_criticality "
+            return ("SELECT category, COUNT(*) AS sku_count "
                     "FROM products GROUP BY category ORDER BY sku_count DESC;")
 
         # supplier list by country
@@ -252,6 +277,19 @@ Return ONLY the raw, executable SQL query. Do not wrap it in markdown formatting
         if "sales" in q and ("last 90" in q or "recent" in q or "3 months" in q):
             return ("SELECT SUM(units_sold) AS total_units, COUNT(DISTINCT sku_id) AS active_skus "
                     "FROM sales WHERE sale_date >= date('now', '-90 days');")
+
+        # low stock / critical items
+        if "low stock" in q or "critical" in q or "stockout" in q:
+            return ("SELECT p.sku_id, p.category, p.sub_category, "
+                    "i.quantity_on_hand, i.unit_cost_inr "
+                    "FROM products p JOIN inventory i ON p.sku_id = i.sku_id "
+                    "ORDER BY i.quantity_on_hand ASC LIMIT 15;")
+
+        # shelf life / expiring
+        if "shelf life" in q or "expir" in q:
+            return ("SELECT sku_id, category, sub_category, shelf_life_days "
+                    "FROM products WHERE shelf_life_days IS NOT NULL "
+                    "ORDER BY shelf_life_days ASC LIMIT 15;")
 
         return None
 

@@ -21,7 +21,9 @@ from pathlib import Path
 
 from app.database import get_db
 from app.config import get_settings
-from app.forecasting.data_pipeline import load_products_data
+from app.forecasting.data_pipeline import load_products_data, SKU_CATEGORY_PREFIX
+from app.forecasting.constants import get_stockout_severity, get_risk_level
+from app.models import Inventory, Product
 
 # --- Conditional ML imports (not available in cloud deployment) ---
 try:
@@ -436,8 +438,6 @@ def _load_sales_csv():
 async def list_products(
     category: Optional[str] = Query(None),
     sub_category: Optional[str] = Query(None),
-    criticality_min: Optional[float] = Query(None),
-    criticality_max: Optional[float] = Query(None),
     search: Optional[str] = Query(None),
 ):
     """
@@ -452,7 +452,7 @@ async def list_products(
     products_df.rename(columns={
         "SKU_ID": "sku_id", "Category": "category", "Sub_Category": "sub_category",
         "Machine_Compatibility": "machine_compatibility", "Shelf_Life_Days": "shelf_life_days",
-        "Unit_Volume_m3": "unit_volume_m3", "Criticality_Score": "criticality_score",
+        "Unit_Volume_m3": "unit_volume_m3",
     }, inplace=True)
 
     # Load sales for demand summary
@@ -478,10 +478,6 @@ async def list_products(
         products_df = products_df[products_df["category"] == category]
     if sub_category:
         products_df = products_df[products_df["sub_category"] == sub_category]
-    if criticality_min is not None:
-        products_df = products_df[products_df["criticality_score"] >= criticality_min]
-    if criticality_max is not None:
-        products_df = products_df[products_df["criticality_score"] <= criticality_max]
     if search:
         search_upper = search.upper()
         products_df = products_df[
@@ -490,8 +486,8 @@ async def list_products(
             products_df["sub_category"].str.upper().str.contains(search_upper)
         ]
 
-    # Sort by criticality descending, then avg weekly demand
-    products_df = products_df.sort_values(["criticality_score", "avg_weekly"], ascending=[False, False])
+    # Sort by avg weekly demand
+    products_df = products_df.sort_values(["avg_weekly"], ascending=[False])
 
     # Get unique filter values
     all_products = pd.read_csv(products_path)
@@ -509,7 +505,6 @@ async def list_products(
             "sub_category": row.get("sub_category", ""),
             "machine_compatibility": row.get("machine_compatibility", ""),
             "shelf_life_days": int(float(row.get("shelf_life_days", 0) or 0) if not pd.isna(row.get("shelf_life_days")) else 0),
-            "criticality_score": float(row.get("criticality_score", 0.5) or 0.5),
             "avg_weekly_demand": float(row.get("avg_weekly", 0) or 0),
             "total_13w": int(row.get("total_13w", 0) or 0),
             "weeks_active": int(row.get("weeks_active", 0) or 0),
@@ -554,7 +549,6 @@ async def sku_explorer(
             product_info = {
                 "category": str(prod_row.iloc[0].get("Category", "Unknown") or "Unknown"),
                 "sub_category": str(prod_row.iloc[0].get("Sub_Category", "") or ""),
-                "criticality": float(prod_row.iloc[0].get("Criticality_Score", 0.5) or 0.5),
                 "shelf_life_days": int(float(prod_row.iloc[0].get("Shelf_Life_Days", 0) or 0) if not pd.isna(prod_row.iloc[0].get("Shelf_Life_Days")) else 0),
             }
 
@@ -603,9 +597,10 @@ async def sku_explorer(
 
     # Stockout alert
     stockout_alert = None
-    if coverage_weeks < 6:
+    severity = get_stockout_severity(coverage_weeks)
+    if severity:
         stockout_alert = {
-            "severity": "CRITICAL" if coverage_weeks < 4 else "HIGH",
+            "severity": severity,
             "message": f"Estimated stock covers only {coverage_weeks} weeks at forecasted demand ({round(forecast_weekly)}/wk). Recommend immediate reorder.",
             "weeks_until_stockout": coverage_weeks,
         }
@@ -637,10 +632,10 @@ async def sku_explorer(
 
 
 @router.get("/reorder-recommendations")
-async def reorder_recommendations():
+async def reorder_recommendations(db: Session = Depends(get_db)):
     """
     Generate reorder recommendations: which SKUs to order, how much, and by when.
-    Combines demand forecast, estimated stock, and supplier lead times.
+    Combines demand forecast, real inventory stock, and supplier lead times.
     """
     sales_df = _load_sales_csv()
     products_df = load_products_data()
@@ -658,6 +653,16 @@ async def reorder_recommendations():
             "Unit_Cost_INR": "unit_cost_inr",
         }, inplace=True)
 
+    # ── Load real inventory from DB ──
+    inventory_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).all()
+    stock_map = {row.sku_id: row.quantity_on_hand for row in inventory_rows}
+
+    # ── Load per-SKU costs from products table ──
+    sku_cost_rows = db.query(Product.sku_id, Product.unit_cost_inr).filter(
+        Product.unit_cost_inr.isnot(None)
+    ).all()
+    sku_cost_map = {row.sku_id: row.unit_cost_inr for row in sku_cost_rows}
+
     max_date = sales_df["sale_date"].max()
     cutoff_13w = max_date - pd.Timedelta(weeks=13)
     recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
@@ -669,13 +674,11 @@ async def reorder_recommendations():
 
     # Merge category
     if products_df is not None and len(products_df) > 0:
-        sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category", "Criticality_Score"]].drop_duplicates("SKU_ID"),
+        sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category"]].drop_duplicates("SKU_ID"),
                                      left_on="sku_id", right_on="SKU_ID", how="left")
-        sku_stats.rename(columns={"Category": "category", "Criticality_Score": "criticality"}, inplace=True)
+        sku_stats.rename(columns={"Category": "category"}, inplace=True)
     else:
-        prefix_map = {"SP": "Spare Parts", "LU": "Lubricants", "EP": "Electric Pumps", "EN": "Engines", "PC": "Precision Components"}
-        sku_stats["category"] = sku_stats["sku_id"].str[:2].map(prefix_map).fillna("Unknown")
-        sku_stats["criticality"] = 0.5
+        sku_stats["category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
 
     # Trend
     cutoff_4w = max_date - pd.Timedelta(weeks=4)
@@ -688,7 +691,10 @@ async def reorder_recommendations():
 
     # Forecast weekly demand
     sku_stats["forecast_weekly"] = sku_stats["avg_weekly"] * sku_stats["trend_ratio"]
-    sku_stats["estimated_stock"] = (sku_stats["avg_weekly"] * 8).round(0).astype(int)
+
+    # ── Use real inventory stock from DB ──
+    sku_stats["estimated_stock"] = sku_stats["sku_id"].map(stock_map).fillna(0).astype(int)
+
     sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99)
 
     # Only SKUs needing reorder (coverage < 8 weeks)
@@ -700,17 +706,19 @@ async def reorder_recommendations():
         cat_moq = suppliers_df.groupby("primary_category")["moq"].max().to_dict()
         cat_cost = suppliers_df.groupby("primary_category")["unit_cost_inr"].mean().to_dict()
     else:
-        cat_lead_time = {"Spare Parts": 45, "Electric Pumps": 60, "Lubricants": 30, "Engines": 70, "Precision Components": 55}
-        cat_moq = {"Spare Parts": 50, "Electric Pumps": 10, "Lubricants": 100, "Engines": 5, "Precision Components": 15}
-        cat_cost = {"Spare Parts": 500, "Electric Pumps": 15000, "Lubricants": 200, "Engines": 150000, "Precision Components": 60000}
+        cat_lead_time = {}
+        cat_moq = {}
+        cat_cost = {}
 
     recommendations = []
     today = date.today()
     for _, row in needs_reorder.sort_values("coverage_weeks").iterrows():
+        sku = row["sku_id"]
         cat = row.get("category", "Unknown")
-        lead_days = int(cat_lead_time.get(cat, 45))
-        moq = int(cat_moq.get(cat, 10))
-        unit_cost = float(cat_cost.get(cat, 1000))
+        lead_days = int(cat_lead_time.get(cat, 0))
+        moq = int(cat_moq.get(cat, 1))
+        # Use per-SKU cost from products table, fallback to supplier category average
+        unit_cost = float(sku_cost_map.get(sku, cat_cost.get(cat, 0)))
 
         # Weeks until stockout
         weeks_to_stockout = row["coverage_weeks"]
@@ -731,7 +739,6 @@ async def reorder_recommendations():
         recommendations.append({
             "sku_id": row["sku_id"],
             "category": cat,
-            "criticality": float(row.get("criticality", 0.5)),
             "avg_weekly_demand": round(float(row["avg_weekly"]), 1),
             "forecast_weekly": round(float(row["forecast_weekly"]), 1),
             "estimated_stock": int(row["estimated_stock"]),
@@ -742,7 +749,7 @@ async def reorder_recommendations():
             "qty_recommended": qty_recommended,
             "moq": moq,
             "estimated_cost_inr": round(estimated_cost),
-            "urgency": "CRITICAL" if weeks_to_stockout < 4 else ("HIGH" if weeks_to_stockout < 6 else "MEDIUM"),
+            "urgency": get_risk_level(weeks_to_stockout),
         })
 
     return {
@@ -804,8 +811,8 @@ async def drift_monitor(weeks: int = Query(12, ge=4, le=26)):
             "forecast": forecast,
             "error_pct": error_pct,
             "bias": bias,
-            "overstocked": bias > 10,
-            "understocked": bias < -10,
+            "overstocked": bool(bias > 10),
+            "understocked": bool(bias < -10),
         })
 
         cumulative_actual.append(actual)
@@ -867,13 +874,11 @@ async def export_forecast_csv(horizon_weeks: int = Query(12)):
 
     # Merge category
     if products_df is not None and len(products_df) > 0:
-        sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category", "Sub_Category", "Criticality_Score"]].drop_duplicates("SKU_ID"),
+        sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category", "Sub_Category"]].drop_duplicates("SKU_ID"),
                                      left_on="sku_id", right_on="SKU_ID", how="left")
     else:
-        prefix_map = {"SP": "Spare Parts", "LU": "Lubricants", "EP": "Electric Pumps", "EN": "Engines", "PC": "Precision Components"}
-        sku_stats["Category"] = sku_stats["sku_id"].str[:2].map(prefix_map).fillna("Unknown")
+        sku_stats["Category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
         sku_stats["Sub_Category"] = ""
-        sku_stats["Criticality_Score"] = 0.5
 
     # Trend
     cutoff_4w = max_date - pd.Timedelta(weeks=4)
@@ -899,10 +904,10 @@ async def export_forecast_csv(horizon_weeks: int = Query(12)):
     sku_stats["risk_level"] = sku_stats.apply(lambda r: risk_level(r["coverage_weeks"], r["trend_ratio"]), axis=1)
 
     # Build CSV DataFrame
-    export_df = sku_stats[["sku_id", "Category", "Sub_Category", "Criticality_Score",
+    export_df = sku_stats[["sku_id", "Category", "Sub_Category",
                             "avg_weekly", "forecast_weekly", "trend_ratio", "estimated_stock",
                             "coverage_weeks", "forecast_12w", "shortfall_weeks", "risk_level"]].copy()
-    export_df.columns = ["SKU_ID", "Category", "Sub_Category", "Criticality", "Avg_Weekly_Demand",
+    export_df.columns = ["SKU_ID", "Category", "Sub_Category", "Avg_Weekly_Demand",
                           "Forecast_Weekly", "Trend_Ratio", "Est_Stock", "Coverage_Weeks",
                           f"Forecast_{horizon_weeks}w", "Shortfall_Weeks", "Risk_Level"]
     export_df["Trend_Ratio"] = export_df["Trend_Ratio"].round(3)

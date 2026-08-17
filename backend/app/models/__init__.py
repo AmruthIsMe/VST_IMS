@@ -19,6 +19,7 @@ class Product(Base):
     machine_compatibility = Column(String(200))
     shelf_life_days = Column(Integer)
     unit_volume_m3 = Column(Float)
+    unit_cost_inr = Column(Float)
     criticality_score = Column(Float)
     sap_material_id = Column(String(50), unique=True, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
@@ -229,4 +230,20 @@ class GenieMessage(Base):
     confidence_level = Column(String(20), nullable=True)
     confidence_tag = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Inventory(Base):
+    __tablename__ = "inventory"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sku_id = Column(String(50), ForeignKey("products.sku_id"), unique=True, nullable=False, index=True)
+    quantity_on_hand = Column(Integer, nullable=False, default=0)
+    quantity_reserved = Column(Integer, nullable=False, default=0)
+    quantity_available = Column(Integer, nullable=False, default=0)
+    unit_cost_inr = Column(Float, nullable=True)
+    last_sap_sync_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    product = relationship("Product", foreign_keys=[sku_id], primaryjoin="Inventory.sku_id == Product.sku_id")
 

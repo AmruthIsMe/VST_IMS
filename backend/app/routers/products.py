@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from uuid import UUID
 from app.database import get_db
-from app.models import Product
+from app.models import Product, Inventory
 from app.schemas import ProductCreate, ProductUpdate, ProductResponse, PaginatedResponse
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -40,8 +40,28 @@ def list_products(
 
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
+    # Read actual stock from inventory table
+    stock_map = {}
+    try:
+        sku_ids = [p.sku_id for p in items]
+        if sku_ids:
+            inv_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).filter(
+                Inventory.sku_id.in_(sku_ids)
+            ).all()
+            for sku_id, qty in inv_rows:
+                stock_map[sku_id] = qty
+    except Exception:
+        pass
+
+    response_items = []
+    for p in items:
+        resp = ProductResponse.model_validate(p)
+        resp_dict = resp.model_dump()
+        resp_dict["current_stock"] = stock_map.get(p.sku_id, 0)
+        response_items.append(resp_dict)
+
     return PaginatedResponse(
-        items=[ProductResponse.model_validate(i) for i in items],
+        items=response_items,
         total=total,
         page=page,
         page_size=page_size,

@@ -184,6 +184,8 @@ class DashboardKPI(BaseModel):
     total_sales: float
     low_stock_count: int
     fill_rate: float
+    total_inventory_value: float
+    total_units_in_stock: int
 
 
 class ChartData(BaseModel):
@@ -216,3 +218,32 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class InventoryBase(BaseModel):
+    sku_id: str
+    quantity_on_hand: int = 0
+    quantity_reserved: int = 0
+    quantity_available: int = 0
+    unit_cost_inr: Optional[float] = None
+
+
+class InventoryCreate(InventoryBase):
+    pass
+
+
+class InventoryUpdate(BaseModel):
+    quantity_on_hand: Optional[int] = None
+    quantity_reserved: Optional[int] = None
+    quantity_available: Optional[int] = None
+    unit_cost_inr: Optional[float] = None
+    last_sap_sync_at: Optional[datetime] = None
+
+
+class InventoryResponse(InventoryBase):
+    id: UUID
+    last_sap_sync_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
