@@ -83,24 +83,27 @@ VST IMS is a comprehensive inventory management system built for VST Tillers & T
 | Icons | Lucide React |
 | Linting | oxlint |
 
-### Infrastructure
+### Infrastructure & Deployment
 
-| Component | Technology |
-|---|---|
-| Containerization | Docker Compose (3 services: db, backend, frontend) |
-| Database (Docker) | PostgreSQL 16 |
-| Local Dev | SQLite, uvicorn --reload |
+| Component | Technology | Target |
+|---|---|---|
+| **Frontend Cloud** | React 19 + Vite 8 SPA | **Vercel** (`frontend/`) |
+| **Backend Cloud** | FastAPI (Python 3.11) + Uvicorn | **Render** (`backend/`) |
+| **Production Database** | PostgreSQL 16 | **Supabase** (Managed Cloud DB) |
+| **Local / Build Database** | SQLite (`backend/vst_ims.db`) | Local dev environment |
+| **Containerization** | Docker Compose (db, backend, frontend) | Self-hosted / Local Docker |
 
 ---
 
 ## 3. Database Schema
 
-12 tables managing the full inventory lifecycle:
+15 tables managing the full inventory and intelligent operations lifecycle:
 
 | Table | Rows | Purpose |
 |---|---|---|
 | `products` | 200 | SKU catalog. Fields: sku_id, category, sub_category, machine_compatibility, shelf_life_days, criticality_score (1-5), sap_material_id |
 | `suppliers` | 28 | Vendor directory. Fields: supplier_id, origin_country, primary_category, base_lead_time_days, lead_time_volatility, moq, unit_cost_inr |
+| `inventory` | 200 | Current warehouse stock levels. Fields: sku_id, quantity_on_hand, quantity_reserved, quantity_available, unit_cost_inr, last_sap_sync_at |
 | `users` | 5 | System users with roles (Admin, Manager, Viewer) |
 | `orders` | 5 | Purchase orders. Fields: order_id, order_date, customer_name, total_amount_inr, payment_status, order_status |
 | `order_items` | 0 | Line items per order. FK to orders and products |
@@ -109,6 +112,8 @@ VST IMS is a comprehensive inventory management system built for VST Tillers & T
 | `forecasts` | 10,200 | Ensemble forecast output per SKU per week. Fields: predicted_demand, actual_demand, model_version |
 | `forecast_models` | 0 | Model registry. Fields: model_name, model_type, mae, mape, rmse, smape, bias, ensemble_weight |
 | `forecast_predictions` | 0 | Per-model predictions with confidence intervals. Fields: lower_bound, upper_bound |
+| `genie_conversations` | — | Genie AI conversation sessions |
+| `genie_messages` | — | Genie chat message history with user queries and agent responses |
 | `sap_sync_log` | — | SAP sync audit trail. Fields: sync_type, status, records_synced, error_message |
 | `sap_config` | — | SAP connection settings. Fields: host, system_number, client, user, password_encrypted |
 
@@ -602,19 +607,53 @@ npm run dev
 docker-compose up --build
 ```
 
-### Environment Variables
+### Cloud Production Deployment (Vercel + Render + Supabase)
+
+#### 1. Supabase (Database)
+- Provision a Supabase PostgreSQL instance.
+- Run the one-time cloud seeder from your authorized machine:
+  ```bash
+  cd backend
+  python seed_cloud_db.py --cloud
+  ```
+  *(Requires `CLOUD_DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres` in `backend/.env`)*
+
+#### 2. Render (Backend API)
+- Connected to GitHub repository with root directory or `backend/render.yaml`.
+- Build Command: `pip install -r backend/requirements-deploy.txt`
+- Start Command: `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Environment Variables:
+  - `DATABASE_URL`: Your Supabase connection string (`postgresql://...`)
+  - `DEPLOYMENT_MODE`: `cloud`
+  - `GEMINI_API_KEY`: Your Gemini API key
+  - `SECRET_KEY`: Secure random string for JWT auth
+  - `CORS_ORIGINS`: `["https://<your-app>.vercel.app", "http://localhost:5173"]`
+
+#### 3. Vercel (Frontend SPA)
+- Import `frontend/` directory in Vercel.
+- Framework Preset: **Vite**
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Environment Variables:
+  - `VITE_API_BASE_URL`: `https://<your-render-backend>.onrender.com/api`
+- Single Page App rewrite handled via [vercel.json](file:///d:/VST_PROJECTS/IMS_VST/V2_vst/frontend/vercel.json).
+
+---
+
+### Environment Variables Reference
 
 ```env
-# Database
-DATABASE_URL=sqlite:///path/to/vst_ims.db
+# Local Development (.env)
+DATABASE_URL=sqlite:///vst_ims.db
+GEMINI_API_KEY=your_gemini_api_key_here
+CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
 
-# Gemini (for Genie chatbot)
-GEMINI_API_KEY=your_key_here
-
-# SAP (optional)
-SAP_HOST=
-SAP_USER=
-SAP_PASSWORD=
+# Cloud Production (.env / Dashboard secrets)
+CLOUD_DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+DEPLOYMENT_MODE=cloud
+GEMINI_API_KEY=your_gemini_api_key_here
+CORS_ORIGINS=["https://<your-vercel-app>.vercel.app"]
 ```
 
 ---
