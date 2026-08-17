@@ -19,76 +19,80 @@ def list_products(
     sort_order: str = "asc",
     db: Session = Depends(get_db),
 ):
-    query = db.query(Product)
-
-    if search:
-        query = query.filter(
-            Product.sku_id.ilike(f"%{search}%")
-            | Product.category.ilike(f"%{search}%")
-            | Product.sub_category.ilike(f"%{search}%")
-        )
-    if category:
-        query = query.filter(Product.category == category)
-
-    total = query.count()
-
-    valid_sort_cols = {
-        "sku_id": Product.sku_id,
-        "category": Product.category,
-        "sub_category": Product.sub_category,
-        "machine_compatibility": Product.machine_compatibility,
-        "shelf_life_days": Product.shelf_life_days,
-        "unit_volume_m3": Product.unit_volume_m3,
-        "criticality_score": Product.criticality_score,
-        "created_at": Product.created_at,
-    }
-    sort_col = valid_sort_cols.get(sort_by, Product.sku_id)
-    if sort_order == "desc":
-        query = query.order_by(sort_col.desc())
-    else:
-        query = query.order_by(sort_col.asc())
-
-    items = query.offset((page - 1) * page_size).limit(page_size).all()
-
-    # Read actual stock from inventory table
-    stock_map = {}
     try:
-        sku_ids = [p.sku_id for p in items]
-        if sku_ids:
-            inv_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).filter(
-                Inventory.sku_id.in_(sku_ids)
-            ).all()
-            for sku_id, qty in inv_rows:
-                stock_map[sku_id] = qty
-    except Exception:
-        db.rollback()
+        query = db.query(Product)
 
-    response_items = [
-        ProductResponse(
-            id=p.id,
-            sku_id=p.sku_id,
-            category=p.category,
-            sub_category=p.sub_category,
-            machine_compatibility=p.machine_compatibility,
-            shelf_life_days=p.shelf_life_days,
-            unit_volume_m3=p.unit_volume_m3,
-            criticality_score=p.criticality_score,
-            sap_material_id=p.sap_material_id,
-            current_stock=stock_map.get(p.sku_id, 0),
-            last_synced_at=p.last_synced_at,
-            created_at=p.created_at,
-            updated_at=p.updated_at,
+        if search:
+            query = query.filter(
+                Product.sku_id.ilike(f"%{search}%")
+                | Product.category.ilike(f"%{search}%")
+                | Product.sub_category.ilike(f"%{search}%")
+            )
+        if category:
+            query = query.filter(Product.category == category)
+
+        total = query.count()
+
+        valid_sort_cols = {
+            "sku_id": Product.sku_id,
+            "category": Product.category,
+            "sub_category": Product.sub_category,
+            "machine_compatibility": Product.machine_compatibility,
+            "shelf_life_days": Product.shelf_life_days,
+            "unit_volume_m3": Product.unit_volume_m3,
+            "unit_cost_inr": Product.unit_cost_inr,
+            "criticality_score": Product.criticality_score,
+            "created_at": Product.created_at,
+        }
+        sort_col = valid_sort_cols.get(sort_by, Product.sku_id)
+        if sort_order == "desc":
+            query = query.order_by(sort_col.desc())
+        else:
+            query = query.order_by(sort_col.asc())
+
+        items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+        stock_map = {}
+        try:
+            sku_ids = [p.sku_id for p in items if p.sku_id]
+            if sku_ids:
+                inv_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).filter(
+                    Inventory.sku_id.in_(sku_ids)
+                ).all()
+                for sku_id, qty in inv_rows:
+                    stock_map[sku_id] = qty or 0
+        except Exception:
+            db.rollback()
+
+        response_items = []
+        for p in items:
+            response_items.append({
+                "id": str(p.id) if p.id else "",
+                "sku_id": p.sku_id or "",
+                "category": p.category or "",
+                "sub_category": p.sub_category,
+                "machine_compatibility": p.machine_compatibility,
+                "shelf_life_days": p.shelf_life_days,
+                "unit_volume_m3": p.unit_volume_m3,
+                "unit_cost_inr": getattr(p, "unit_cost_inr", None),
+                "criticality_score": p.criticality_score,
+                "sap_material_id": p.sap_material_id,
+                "current_stock": stock_map.get(p.sku_id, 0),
+                "last_synced_at": p.last_synced_at,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+            })
+
+        return PaginatedResponse(
+            items=response_items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=(total + page_size - 1) // page_size if page_size else 1,
         )
-        for p in items
-    ]
-
-    return PaginatedResponse(
-        items=response_items,
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=(total + page_size - 1) // page_size if page_size else 1,
-    )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {str(e)}")
 
 
 @router.get("/categories")
