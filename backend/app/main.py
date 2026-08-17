@@ -5,12 +5,18 @@ from app.config import get_settings
 from app.database import engine, Base
 from app.routers import products, suppliers, orders, users, dashboard, sap_sync, forecast, genie, inventory
 
+import logging
+
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+    except Exception as e:
+        logger.warning(f"Database schema check notice: {e}")
     yield
 
 
@@ -39,12 +45,12 @@ app.include_router(genie.router)
 app.include_router(inventory.router)
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "healthy", "message": "VST IMS API is running", "app": settings.APP_NAME}
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "healthy", "app": settings.APP_NAME}
 

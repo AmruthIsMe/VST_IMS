@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     SAP_PASSWORD: str = ""
     SAP_LANG: str = "EN"
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def parse_db_url(cls, v):
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors(cls, v):
