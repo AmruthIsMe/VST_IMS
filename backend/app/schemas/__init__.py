@@ -11,7 +11,6 @@ class ProductBase(BaseModel):
     machine_compatibility: Optional[str] = None
     shelf_life_days: Optional[int] = None
     unit_volume_m3: Optional[float] = None
-    unit_cost_inr: Optional[float] = None
     criticality_score: Optional[float] = None
     sap_material_id: Optional[str] = None
 
@@ -26,7 +25,6 @@ class ProductUpdate(BaseModel):
     machine_compatibility: Optional[str] = None
     shelf_life_days: Optional[int] = None
     unit_volume_m3: Optional[float] = None
-    unit_cost_inr: Optional[float] = None
     criticality_score: Optional[float] = None
     sap_material_id: Optional[str] = None
 

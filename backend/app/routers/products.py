@@ -40,7 +40,6 @@ def list_products(
             "machine_compatibility": Product.machine_compatibility,
             "shelf_life_days": Product.shelf_life_days,
             "unit_volume_m3": Product.unit_volume_m3,
-            "unit_cost_inr": Product.unit_cost_inr,
             "criticality_score": Product.criticality_score,
             "created_at": Product.created_at,
         }
@@ -74,7 +73,6 @@ def list_products(
                 "machine_compatibility": p.machine_compatibility,
                 "shelf_life_days": p.shelf_life_days,
                 "unit_volume_m3": p.unit_volume_m3,
-                "unit_cost_inr": getattr(p, "unit_cost_inr", None),
                 "criticality_score": p.criticality_score,
                 "sap_material_id": p.sap_material_id,
                 "current_stock": stock_map.get(p.sku_id, 0),

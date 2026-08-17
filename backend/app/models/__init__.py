@@ -19,7 +19,6 @@ class Product(Base):
     machine_compatibility = Column(String(200))
     shelf_life_days = Column(Integer)
     unit_volume_m3 = Column(Float)
-    unit_cost_inr = Column(Float)
     criticality_score = Column(Float)
     sap_material_id = Column(String(50), unique=True, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
