@@ -32,7 +32,17 @@ def list_products(
 
     total = query.count()
 
-    sort_col = getattr(Product, sort_by, Product.sku_id)
+    valid_sort_cols = {
+        "sku_id": Product.sku_id,
+        "category": Product.category,
+        "sub_category": Product.sub_category,
+        "machine_compatibility": Product.machine_compatibility,
+        "shelf_life_days": Product.shelf_life_days,
+        "unit_volume_m3": Product.unit_volume_m3,
+        "criticality_score": Product.criticality_score,
+        "created_at": Product.created_at,
+    }
+    sort_col = valid_sort_cols.get(sort_by, Product.sku_id)
     if sort_order == "desc":
         query = query.order_by(sort_col.desc())
     else:
@@ -53,19 +63,31 @@ def list_products(
     except Exception:
         db.rollback()
 
-    response_items = []
-    for p in items:
-        resp = ProductResponse.model_validate(p)
-        resp_dict = resp.model_dump()
-        resp_dict["current_stock"] = stock_map.get(p.sku_id, 0)
-        response_items.append(resp_dict)
+    response_items = [
+        ProductResponse(
+            id=p.id,
+            sku_id=p.sku_id,
+            category=p.category,
+            sub_category=p.sub_category,
+            machine_compatibility=p.machine_compatibility,
+            shelf_life_days=p.shelf_life_days,
+            unit_volume_m3=p.unit_volume_m3,
+            criticality_score=p.criticality_score,
+            sap_material_id=p.sap_material_id,
+            current_stock=stock_map.get(p.sku_id, 0),
+            last_synced_at=p.last_synced_at,
+            created_at=p.created_at,
+            updated_at=p.updated_at,
+        )
+        for p in items
+    ]
 
     return PaginatedResponse(
         items=response_items,
         total=total,
         page=page,
         page_size=page_size,
-        total_pages=(total + page_size - 1) // page_size,
+        total_pages=(total + page_size - 1) // page_size if page_size else 1,
     )
 
 

@@ -307,6 +307,14 @@ def seed_inventory(conn):
         "Precision Components": (10, 80),
     }
 
+    category_costs = {
+        "Spare Parts":        (500.0, 3500.0),
+        "Lubricants":         (400.0, 1800.0),
+        "Electric Pumps":     (8000.0, 25000.0),
+        "Engines":            (45000.0, 180000.0),
+        "Precision Components": (15000.0, 65000.0),
+    }
+
     now = datetime.utcnow()
     records = []
     for sku_id, category in prod_rows:
@@ -314,12 +322,17 @@ def seed_inventory(conn):
         on_hand = random.randint(lo, hi)
         reserved = random.randint(0, int(on_hand * 0.3))
         available = on_hand - reserved
+        
+        cost_lo, cost_hi = category_costs.get(category, (800.0, 5000.0))
+        unit_cost = round(random.uniform(cost_lo, cost_hi), 2)
+
         records.append({
             "id": str(uuid.uuid4()),
             "sku_id": sku_id,
             "quantity_on_hand": on_hand,
             "quantity_reserved": reserved,
             "quantity_available": available,
+            "unit_cost_inr": unit_cost,
             "created_at": now,
             "updated_at": now,
         })
