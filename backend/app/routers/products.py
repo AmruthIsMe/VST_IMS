@@ -51,7 +51,7 @@ def list_products(
             for sku_id, qty in inv_rows:
                 stock_map[sku_id] = qty
     except Exception:
-        pass
+        db.rollback()
 
     response_items = []
     for p in items:

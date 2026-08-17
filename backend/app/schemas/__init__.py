@@ -31,6 +31,7 @@ class ProductUpdate(BaseModel):
 
 class ProductResponse(ProductBase):
     id: UUID
+    current_stock: Optional[int] = 0
     last_synced_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
