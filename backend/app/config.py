@@ -17,11 +17,13 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = "vst-ims-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
-
-    SAP_HOST: str = ""
+    CORS_ORIGINS: list[str] = [
+        "https://vst-ims.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:8000",
+    ]
+    CORS_ORIGIN_REGEX: str = r"^https:\/\/.*\.vercel\.app$|^http:\/\/localhost(:\d+)?$"
     SAP_SYSNR: str = "00"
     SAP_CLIENT: str = "100"
     SAP_USER: str = ""
