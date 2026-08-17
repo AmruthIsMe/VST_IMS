@@ -1,13 +1,17 @@
 """
 Forecast API Router for VST IMS.
 Endpoints for training, predicting, comparing, and managing forecasting models.
+
+Supports two modes:
+- LOCAL:  Full ML — trains models, runs inference, loads .joblib files
+- CLOUD:  Pre-computed — serves predictions from DB, no ML libs needed
 """
 
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import pandas as pd
 import numpy as np
 import io
@@ -16,13 +20,22 @@ import logging
 from pathlib import Path
 
 from app.database import get_db
-from app.forecasting.ensemble import get_ensemble
-from app.forecasting.rl_feedback import get_feedback_loop
-from app.forecasting.data_pipeline import prepare_dataset, load_products_data
+from app.config import get_settings
+from app.forecasting.data_pipeline import load_products_data
+
+# --- Conditional ML imports (not available in cloud deployment) ---
+try:
+    from app.forecasting.ensemble import get_ensemble
+    from app.forecasting.rl_feedback import get_feedback_loop
+    from app.forecasting.data_pipeline import prepare_dataset
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/forecast", tags=["forecast"])
 DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+DEPLOYMENT_MODE = get_settings().DEPLOYMENT_MODE
 
 
 @router.post("/train")
@@ -33,6 +46,11 @@ async def train_models(
     test_weeks: int = Query(12, description="Number of weeks for test split"),
 ):
     """Train all forecasting models and compute ensemble weights."""
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return {
+            "status": "cloud_mode",
+            "message": "Training is disabled on the cloud server. Run 'python train_and_upload.py' on your local machine to train models and upload predictions.",
+        }
     ensemble = get_ensemble()
     try:
         results = ensemble.train_all_models(
@@ -63,8 +81,13 @@ async def get_predictions(
     category: Optional[str] = Query(None),
     horizon_weeks: int = Query(12, ge=1, le=52),
     model: Optional[str] = Query(None, description="Specific model name or 'ensemble'"),
+    db: Session = Depends(get_db),
 ):
     """Get demand predictions from ensemble or specific model."""
+    # --- Cloud mode: read pre-computed predictions from DB ---
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return _predict_from_db(db, sku_id=sku_id, category=category, horizon_weeks=horizon_weeks)
+
     ensemble = get_ensemble()
 
     if not ensemble.is_trained:
@@ -104,8 +127,12 @@ async def get_predictions(
 async def compare_models(
     sku_id: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ):
     """Compare all model predictions side-by-side on test data."""
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return _compare_from_db(db, sku_id=sku_id)
+
     ensemble = get_ensemble()
 
     if not ensemble.is_trained:
@@ -167,8 +194,12 @@ async def get_metrics(
     sku_id: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     group_by: Optional[str] = Query(None, description="Group metrics by: category, sku"),
+    db: Session = Depends(get_db),
 ):
     """Get detailed error metrics for all models."""
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return _metrics_from_db(db)
+
     ensemble = get_ensemble()
 
     if not ensemble.is_trained:
@@ -219,8 +250,11 @@ async def get_metrics(
 
 
 @router.get("/ensemble-weights")
-async def get_ensemble_weights():
+async def get_ensemble_weights(db: Session = Depends(get_db)):
     """Get current ensemble weights and their evolution history."""
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return _weights_from_db(db)
+
     ensemble = get_ensemble()
     feedback = get_feedback_loop()
 
@@ -241,6 +275,11 @@ async def retrain_models(
     Trigger re-training with RL feedback loop.
     Updates model weights based on accumulated error signals.
     """
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return {
+            "status": "cloud_mode",
+            "message": "Retraining is disabled on the cloud server. Run 'python train_and_upload.py' on your local machine.",
+        }
     ensemble = get_ensemble()
     feedback = get_feedback_loop()
 
@@ -280,8 +319,11 @@ async def retrain_models(
 
 
 @router.get("/models")
-async def list_models():
+async def list_models(db: Session = Depends(get_db)):
     """List all available forecasting models with their status."""
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return _models_from_db(db)
+
     ensemble = get_ensemble()
 
     models_info = []
@@ -305,8 +347,11 @@ async def list_models():
 
 
 @router.get("/summary")
-async def get_forecast_summary():
+async def get_forecast_summary(db: Session = Depends(get_db)):
     """AI-generated summary of forecasting performance."""
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return _summary_from_db(db)
+
     ensemble = get_ensemble()
 
     if not ensemble.is_trained:
@@ -955,3 +1000,259 @@ async def forecast_calendar(
         "total_weekly_demand": round(float(total_weekly)),
         "calendar": calendar,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  CLOUD MODE — DB-backed helpers for pre-computed predictions
+# ═══════════════════════════════════════════════════════════════════
+
+def _predict_from_db(db: Session, sku_id=None, category=None, horizon_weeks=12):
+    """Read pre-computed predictions from forecast_predictions table."""
+    from sqlalchemy import text
+
+    query = "SELECT model_name, sku_id, forecast_date, predicted_demand, lower_bound, upper_bound, actual_demand FROM forecast_predictions"
+    conditions = []
+    params = {}
+    if sku_id:
+        conditions.append("sku_id = :sku_id")
+        params["sku_id"] = sku_id
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY forecast_date LIMIT :limit"
+    params["limit"] = horizon_weeks * 7  # generous limit
+
+    rows = db.execute(text(query), params).fetchall()
+    if not rows:
+        return {"status": "not_trained", "message": "No predictions available yet. Run train_and_upload.py locally to generate predictions."}
+
+    df = pd.DataFrame(rows, columns=["model_name", "sku_id", "forecast_date", "predicted_demand", "lower_bound", "upper_bound", "actual_demand"])
+    df["forecast_date"] = pd.to_datetime(df["forecast_date"])
+
+    # Build ensemble predictions (weighted average)
+    weights = _get_weight_map(db)
+    dates = sorted(df["forecast_date"].unique())[:horizon_weeks]
+
+    ensemble_preds = []
+    per_model = {}
+    for d in dates:
+        day_df = df[df["forecast_date"] == d]
+        weighted_sum = 0
+        total_weight = 0
+        for _, row in day_df.iterrows():
+            w = weights.get(row["model_name"], 1.0 / max(len(weights), 1))
+            weighted_sum += row["predicted_demand"] * w
+            total_weight += w
+            per_model.setdefault(row["model_name"], []).append(float(row["predicted_demand"]))
+        ensemble_preds.append(round(weighted_sum / max(total_weight, 0.001), 1))
+
+    actuals = df.groupby("forecast_date")["actual_demand"].first().dropna().tolist()
+
+    return {
+        "status": "success",
+        "data": {
+            "predictions": ensemble_preds,
+            "per_model": per_model,
+            "weights": weights,
+            "dates": [str(d)[:10] for d in dates],
+            "actuals": actuals[:horizon_weeks] if actuals else [],
+        },
+    }
+
+
+def _compare_from_db(db: Session, sku_id=None):
+    """Read pre-computed predictions for model comparison."""
+    from sqlalchemy import text
+
+    query = "SELECT model_name, forecast_date, predicted_demand, actual_demand FROM forecast_predictions"
+    params = {}
+    if sku_id:
+        query += " WHERE sku_id = :sku_id"
+        params["sku_id"] = sku_id
+    query += " ORDER BY forecast_date"
+
+    rows = db.execute(text(query), params).fetchall()
+    if not rows:
+        return {"status": "not_trained", "message": "No predictions available."}
+
+    df = pd.DataFrame(rows, columns=["model_name", "forecast_date", "predicted_demand", "actual_demand"])
+
+    dates = sorted(df["forecast_date"].unique())
+    all_preds = {}
+    for model_name, group in df.groupby("model_name"):
+        all_preds[model_name] = group.sort_values("forecast_date")["predicted_demand"].tolist()
+
+    actuals = df.groupby("forecast_date")["actual_demand"].first().sort_index().tolist()
+    weights = _get_weight_map(db)
+
+    return {
+        "status": "success",
+        "comparison": {name: {"predictions": preds} for name, preds in all_preds.items()},
+        "chart_data": {
+            "dates": [str(d)[:10] for d in dates],
+            "actual": actuals,
+            "predictions": all_preds,
+        },
+        "weights": weights,
+    }
+
+
+def _metrics_from_db(db: Session):
+    """Read pre-computed model metrics from forecast_models table."""
+    from sqlalchemy import text
+
+    rows = db.execute(text(
+        "SELECT model_name, model_type, mae, mape, rmse, smape, bias, ensemble_weight, trained_at "
+        "FROM forecast_models WHERE is_active = true ORDER BY model_name"
+    )).fetchall()
+
+    if not rows:
+        return {"status": "not_trained", "message": "No model metrics available."}
+
+    model_metrics = {}
+    weights = {}
+    for row in rows:
+        name = row[0]
+        model_metrics[name] = {
+            "mae": row[2], "mape": row[3], "rmse": row[4],
+            "smape": row[5], "bias": row[6],
+        }
+        weights[name] = row[7] or 0
+
+    return {"status": "success", "metrics": model_metrics, "weights": weights, "test_size": 0}
+
+
+def _weights_from_db(db: Session):
+    """Read ensemble weights from forecast_models table."""
+    from sqlalchemy import text
+
+    rows = db.execute(text(
+        "SELECT model_name, ensemble_weight FROM forecast_models WHERE is_active = true"
+    )).fetchall()
+
+    weights = {row[0]: row[1] or 0 for row in rows}
+
+    return {
+        "current_weights": weights,
+        "weight_history": [],
+        "rl_diagnostics": {"message": "RL diagnostics available in local mode only"},
+        "retrain_suggestions": [],
+    }
+
+
+def _models_from_db(db: Session):
+    """Read model list from forecast_models table."""
+    from sqlalchemy import text
+
+    rows = db.execute(text(
+        "SELECT model_name, model_type, ensemble_weight, trained_at, mae, mape "
+        "FROM forecast_models WHERE is_active = true ORDER BY model_name"
+    )).fetchall()
+
+    all_model_names = ["xgboost", "lightgbm", "arima", "sarima", "prophet", "holt_winters"]
+    db_models = {row[0]: row for row in rows}
+
+    models_info = []
+    for name in all_model_names:
+        if name in db_models:
+            row = db_models[name]
+            models_info.append({
+                "name": name,
+                "type": row[1] or _get_model_type(name),
+                "is_trained": True,
+                "weight": row[2] or 0,
+                "description": _get_model_description(name),
+                "train_date": str(row[3]) if row[3] else None,
+                "params": {"mape": row[5]},
+            })
+        else:
+            models_info.append({
+                "name": name,
+                "type": _get_model_type(name),
+                "is_trained": False,
+                "weight": 0,
+                "description": _get_model_description(name),
+            })
+
+    return {"models": models_info}
+
+
+def _summary_from_db(db: Session):
+    """Read training summary from forecast_models table."""
+    from sqlalchemy import text
+
+    rows = db.execute(text(
+        "SELECT model_name, ensemble_weight, mape, trained_at "
+        "FROM forecast_models WHERE is_active = true ORDER BY ensemble_weight DESC"
+    )).fetchall()
+
+    if not rows:
+        return {
+            "summary": "No models trained yet. Run `python train_and_upload.py` on your local machine to train and upload predictions.",
+            "status": "not_trained",
+        }
+
+    best_model = rows[0][0]
+    best_weight = rows[0][1] or 0
+    avg_mape = np.mean([r[2] for r in rows if r[2] is not None])
+    trained_at = rows[0][3]
+    models_count = len(rows)
+
+    summary_parts = [
+        f"📊 **Ensemble trained** with {models_count} models.",
+        f"🏆 **Best model**: {best_model} (weight: {best_weight:.1%})",
+        f"📈 **Avg MAPE**: {avg_mape:.1f}%",
+        f"🕐 **Last trained**: {trained_at or 'Unknown'}",
+        f"☁️ Running in **cloud mode** — predictions pre-computed locally.",
+    ]
+
+    return {
+        "summary": "\n".join(summary_parts),
+        "status": "trained",
+        "latest_training": {"models_trained": models_count, "trained_at": str(trained_at)},
+    }
+
+
+def _get_weight_map(db: Session) -> dict:
+    """Get model name → weight mapping from DB."""
+    from sqlalchemy import text
+    rows = db.execute(text(
+        "SELECT model_name, ensemble_weight FROM forecast_models WHERE is_active = true"
+    )).fetchall()
+    return {row[0]: row[1] or 0 for row in rows}
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  TRAINING STATUS — shows when predictions were last uploaded
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/training-status")
+async def training_status(db: Session = Depends(get_db)):
+    """Show when models were last trained and predictions uploaded."""
+    from sqlalchemy import text
+
+    try:
+        row = db.execute(text(
+            "SELECT MAX(trained_at) FROM forecast_models WHERE is_active = true"
+        )).fetchone()
+        last_trained = str(row[0]) if row and row[0] else None
+    except Exception:
+        last_trained = None
+
+    try:
+        pred_row = db.execute(text(
+            "SELECT COUNT(*), MAX(created_at) FROM forecast_predictions"
+        )).fetchone()
+        prediction_count = pred_row[0] if pred_row else 0
+        last_uploaded = str(pred_row[1]) if pred_row and pred_row[1] else None
+    except Exception:
+        prediction_count = 0
+        last_uploaded = None
+
+    return {
+        "deployment_mode": DEPLOYMENT_MODE,
+        "ml_available": ML_AVAILABLE,
+        "last_trained": last_trained,
+        "last_predictions_uploaded": last_uploaded,
+        "total_predictions": prediction_count,
+    }
+

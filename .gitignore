@@ -28,6 +28,7 @@ ENV/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+*.ipynb
 
 # IDE & Editors
 .vscode/
@@ -45,6 +46,19 @@ Thumbs.db
 *.db-wal
 .env
 
-# Model Artifacts
+# Trained ML Models (too large for Git — uploaded via train_and_upload.py)
+backend/trained_models/
 *.joblib
 
+# Node
+node_modules/
+
+# Build artifacts
+Binaries/
+Builds/
+*.dll
+*.vst3
+*.lib
+
+# Misc
+anaconda_projects/

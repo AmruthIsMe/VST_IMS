@@ -1,0 +1,22 @@
+# VST IMS Backend — Cloud Deployment (No ML Libraries)
+# Use this on Render/Railway. For local dev, use requirements.txt instead.
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.9
+httpx>=0.27.0
+pandas>=2.2.0
+numpy>=1.26.0
+python-dotenv>=1.0.0
+
+# PostgreSQL driver
+psycopg2-binary>=2.9.0
+
+# LLM / Chatbot (Genie still works in cloud mode)
+google-generativeai>=0.8.0
