@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import get_settings
 from app.database import engine, Base, SessionLocal
+from app.models import User
 from app.routers import products, suppliers, orders, users, dashboard, sap_sync, forecast, genie, inventory, auth
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -16,8 +17,6 @@ settings = get_settings()
 
 limiter = Limiter(key_func=get_remote_address)
 
-
-from app.models import User
 
 
 def _seed_demo_users():

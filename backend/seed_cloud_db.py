@@ -165,6 +165,8 @@ def seed_users(conn):
             "status": "Active",
             "created_at": now,
             "updated_at": now,
+        })
+
     # Also add standard demo accounts for UI login
     demo_defaults = [
         {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
