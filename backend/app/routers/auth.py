@@ -50,81 +50,75 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user_id = payload.get("sub")
-    row = db.execute(
-        text("SELECT id, user_id, name, email, role, status FROM users WHERE user_id = :u"),
-        {"u": user_id},
-    ).fetchone()
-    if not row:
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
         raise HTTPException(status_code=401, detail="User not found")
-    if row.status != "Active":
+    if user.status != "Active":
         raise HTTPException(status_code=403, detail="Account is not active")
 
-    return {"user_id": row.user_id, "name": row.name, "email": row.email, "role": row.role}
+    return {"user_id": user.user_id, "name": user.name, "email": user.email, "role": user.role}
 
 
 @router.post("/login")
 @limiter.limit("10/minute")
 def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
 
-    row = db.execute(
-        text("SELECT id, user_id, name, email, password_hash, role, status FROM users WHERE user_id = :u OR email = :u"),
-        {"u": req.username},
-    ).fetchone()
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username is required")
 
-    if not row or not pwd_context.verify(req.password, row.password_hash):
+    user = db.query(User).filter(
+        (User.user_id.ilike(username)) | (User.email.ilike(username))
+    ).first()
+
+    if not user or not user.password_hash or not pwd_context.verify(req.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
 
-    if row.status != "Active":
+    if user.status != "Active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not active",
         )
 
-    now = datetime.utcnow().isoformat()
-    db.execute(
-        text("UPDATE users SET last_login = :now WHERE id = :id"),
-        {"id": row.id, "now": now},
-    )
+    user.last_login = datetime.utcnow()
     db.commit()
 
     token = create_access_token(
-        data={"sub": row.user_id, "role": row.role, "name": row.name, "email": row.email}
+        data={"sub": user.user_id, "role": user.role, "name": user.name, "email": user.email}
     )
 
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": {
-            "id": str(row.id),
-            "user_id": row.user_id,
-            "name": row.name,
-            "email": row.email,
-            "role": row.role,
-            "status": row.status,
+            "id": str(user.id),
+            "user_id": user.user_id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+            "status": user.status,
         },
     }
 
 
 @router.get("/me")
 def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    row = db.execute(
-        text("SELECT id, user_id, name, email, role, status, last_login FROM users WHERE user_id = :u"),
-        {"u": current_user["user_id"]},
-    ).fetchone()
-    if not row:
+    user = db.query(User).filter(User.user_id == current_user["user_id"]).first()
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     return {
-        "id": str(row.id),
-        "user_id": row.user_id,
-        "name": row.name,
-        "email": row.email,
-        "role": row.role,
-        "status": row.status,
-        "last_login": row.last_login.isoformat() if row.last_login else None,
+        "id": str(user.id),
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "status": user.status,
+        "last_login": user.last_login.isoformat() if user.last_login else None,
     }
+

@@ -17,40 +17,54 @@ settings = get_settings()
 limiter = Limiter(key_func=get_remote_address)
 
 
-def _seed_demo_users():
-    """Seed demo users only in local mode. Never runs in production."""
-    from passlib.context import CryptContext
-    from sqlalchemy import text
-    from datetime import datetime
+from app.models import User
 
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _seed_demo_users():
+    """Seed demo users in both local and cloud mode."""
+    from passlib.context import CryptContext
+    from datetime import datetime
+    import uuid
+
+    pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
     db = SessionLocal()
     try:
         demo_users = [
-            {"user_id": "manager", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Manager"},
-            {"user_id": "admin", "name": "Amruth", "email": "amit.verma@vst.com", "role": "Admin"},
-            {"user_id": "cashier", "name": "Rahul Desai", "email": "rahul.d@vst.com", "role": "Cashier"},
+            {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+            {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
+            {"user_id": "cashier", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
+            {"user_id": "USR-001", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
+            {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
+            {"user_id": "USR-003", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
         ]
         hashed = pwd_context.hash("vst2026")
-        now = datetime.utcnow().isoformat()
+        now = datetime.utcnow()
         for du in demo_users:
-            existing = db.execute(
-                text("SELECT id FROM users WHERE email = :email"),
-                {"email": du["email"]},
-            ).fetchone()
-            if existing:
-                db.execute(
-                    text("UPDATE users SET password_hash = :pw, user_id = :uid, role = :role, status = 'Active' WHERE email = :email"),
-                    {"pw": hashed, "uid": du["user_id"], "role": du["role"], "email": du["email"]},
-                )
+            user = db.query(User).filter(
+                (User.user_id.ilike(du["user_id"])) | (User.email.ilike(du["email"]))
+            ).first()
+            if user:
+                user.user_id = du["user_id"]
+                user.name = du["name"]
+                user.role = du["role"]
+                user.password_hash = hashed
+                user.status = "Active"
+                user.updated_at = now
             else:
-                import uuid
-                db.execute(
-                    text("INSERT INTO users (id, user_id, name, email, password_hash, role, status, created_at, updated_at) VALUES (:id, :uid, :name, :email, :pw, :role, 'Active', :now, :now)"),
-                    {"id": str(uuid.uuid4()), "uid": du["user_id"], "name": du["name"], "email": du["email"], "pw": hashed, "role": du["role"], "now": now},
+                new_user = User(
+                    id=uuid.uuid4(),
+                    user_id=du["user_id"],
+                    name=du["name"],
+                    email=du["email"],
+                    password_hash=hashed,
+                    role=du["role"],
+                    status="Active",
+                    created_at=now,
+                    updated_at=now,
                 )
+                db.add(new_user)
         db.commit()
-        logger.info("Demo users seeded successfully")
+        logger.info("Demo users seeded/verified successfully")
     except Exception as e:
         logger.warning(f"Demo user seeding notice: {e}")
         db.rollback()

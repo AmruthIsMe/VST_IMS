@@ -165,8 +165,26 @@ def seed_users(conn):
             "status": "Active",
             "created_at": now,
             "updated_at": now,
-        })
-    
+    # Also add standard demo accounts for UI login
+    demo_defaults = [
+        {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+        {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
+        {"user_id": "cashier", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
+    ]
+    for demo in demo_defaults:
+        if not any(r["user_id"] == demo["user_id"] or r["email"] == demo["email"] for r in records):
+            records.append({
+                "id": str(uuid.uuid4()),
+                "user_id": demo["user_id"],
+                "name": demo["name"],
+                "email": demo["email"],
+                "password_hash": get_hash("vst2026"),
+                "role": demo["role"],
+                "status": "Active",
+                "created_at": now,
+                "updated_at": now,
+            })
+
     pd.DataFrame(records).to_sql("users", conn, if_exists="append", index=False, method="multi")
     print(f"   ✅ {len(records)} users seeded")
 
