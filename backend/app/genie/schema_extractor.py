@@ -22,6 +22,7 @@ from typing import Optional
 from app.models import (
     Product, Supplier, Sale, Order, OrderItem, ExternalFactor,
     Forecast, ForecastModel, ForecastPrediction, User, SapSyncLog, SapConfig,
+    Inventory,
 )
 from app.database import engine
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_TABLES = [
     "products", "suppliers", "sales", "external_factors",
     "forecasts", "forecast_models", "forecast_predictions",
-    "orders", "order_items",
+    "orders", "order_items", "inventory",
 ]
 
 # ── Domain notes added to the schema prompt ────────────────────────────
@@ -46,8 +47,10 @@ BUSINESS RULES & DERIVED METRICS (apply when writing SQL):
 - `sales.sale_date` is weekly (every Monday).  Use `strftime('%Y-W%W', sale_date)` for week-bucketing.
 - `sales.units_sold` is the weekly demand.  "Recent N-week average" = AVG over the last N sale_dates.
 - "Burn rate" = average `units_sold` over the most recent 13 weeks.
-- We have NO live inventory-on-hand table; on-hand stock is approximate = burn_rate * 8 weeks coverage.
-- "Coverage weeks" = estimated_stock / weekly_demand.
+- We have a LIVE `inventory` table (synced from SAP): quantity_on_hand / quantity_reserved / quantity_available per sku_id.
+  For "current stock" questions, use inventory.quantity_available. If no inventory row exists for a SKU,
+  estimate stock = burn_rate * 8 weeks coverage.
+- "Coverage weeks" = available_stock / weekly_demand.
 - `suppliers.origin_country` ∈ {Japan, China, Germany, India, Domestic}.
 - `suppliers.base_lead_time_days` is the normal lead time; assume replenishment lead time equals this.
 - `external_factors.factor_date` aligns with `sales.sale_date`; carries `monsoon_index`, `crop_sowing_season`, `macro_economic_index`.
@@ -165,6 +168,13 @@ FREQUENTLY_COMMENTED = {
         "unit_price_inr": "per-unit price in INR",
         "total_price_inr": "quantity * unit_price_inr",
     },
+    "inventory": {
+        "sku_id": "FK to products.sku_id (unique)",
+        "quantity_on_hand": "physical stock synced from SAP",
+        "quantity_reserved": "stock allocated to orders",
+        "quantity_available": "on_hand minus reserved — use for availability answers",
+        "last_sap_sync_at": "when SAP last pushed this stock level",
+    },
 }
 
 
@@ -197,6 +207,7 @@ _MODEL_MAP = {
     "forecast_predictions": ForecastPrediction,
     "orders": Order,
     "order_items": OrderItem,
+    "inventory": Inventory,
 }
 
 

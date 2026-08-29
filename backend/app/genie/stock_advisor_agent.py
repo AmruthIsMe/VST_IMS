@@ -84,6 +84,30 @@ class StockAdvisorAgent:
         # ── Expert A: current stock ─────────────────────────────────
         expert_a = self._expert_a_stock(db, target_skus, category_filter)
 
+        # Unknown SKU guardrail — don't fabricate an "all clear" for a
+        # SKU that isn't in the database.
+        if target_skus and expert_a.get("count", 0) == 0:
+            missing = ", ".join(target_skus)
+            return {
+                "question": question,
+                "expert_a": expert_a,
+                "expert_b": {"skus": [], "count": 0},
+                "math": {"skus": [], "count": 0, "total_shortfall_units": 0,
+                         "total_recommended_units": 0, "skus_needing_reorder": 0},
+                "summary": {
+                    "text": (
+                        f"I couldn't find **{missing}** in the product database. "
+                        f"Please check the SKU code — valid codes look like "
+                        f"`SP-FIL-0001`, `EN-DIE-0002`, `EP-MON-0012` "
+                        f"(SP=Spare Parts, EN=Engines, EP=Electric Pumps, "
+                        f"PC=Precision Components)."
+                    ),
+                    "source": "rule_based",
+                },
+                "error": None,
+                "data_sources": [],
+            }
+
         # ── Expert B: projected demand ──────────────────────────────
         expert_b = self._expert_b_demand(
             db, target_skus, category_filter, target_month, current_year
@@ -152,18 +176,20 @@ class StockAdvisorAgent:
 
     # ── Expert A: current stock from DB ─────────────────────────────
     def _expert_a_stock(self, db: Session, target_skus: list = None, category: str = None) -> dict:
-        """Compute per-SKU burn rate and estimated stock from sales history.
+        """Compute per-SKU current stock + burn rate.
 
-        Uses the 13 weeks before the most recent sale_date (not 'now'),
-        because the dataset may not have data up to today.
+        Stock source (in priority order):
+          1. Live `inventory` table (SAP-synced quantity_available).
+          2. Fallback estimate = 13-week burn rate x 8 weeks coverage.
+        Burn rate = AVG weekly demand over the 13 weeks before the most
+        recent sale_date (not 'now'), because data may lag today.
         """
         try:
-            # Find the latest sale date in the DB (handles datasets with older data)
             max_date_result = db.execute(text("SELECT MAX(sale_date) FROM sales"))
             max_sale_date = max_date_result.scalar()
             if max_sale_date is None:
                 return {"skus": [], "count": 0, "error": "No sales data found"}
-            
+
             if isinstance(max_sale_date, str):
                 max_dt = pd.to_datetime(max_sale_date).date()
             elif hasattr(max_sale_date, "date"):
@@ -177,9 +203,11 @@ class StockAdvisorAgent:
                 "SELECT s.sku_id, p.category, p.sub_category, p.criticality_score,",
                 "       AVG(s.units_sold) AS avg_weekly,",
                 "       SUM(s.units_sold) AS total_units_13w,",
-                "       COUNT(DISTINCT s.sale_date) AS weeks_active",
+                "       COUNT(DISTINCT s.sale_date) AS weeks_active,",
+                "       MAX(i.quantity_available) AS live_stock",
                 "FROM sales s",
                 "JOIN products p ON s.product_id = p.id",
+                "LEFT JOIN inventory i ON i.sku_id = s.sku_id",
             ]
             conditions = [
                 "s.sale_date >= :cutoff_date",
@@ -204,7 +232,13 @@ class StockAdvisorAgent:
             skus = []
             for r in rows:
                 avg_weekly = float(r["avg_weekly"] or 0)
-                estimated_stock = round(avg_weekly * 8)  # 8 weeks coverage
+                live_stock = r.get("live_stock")
+                if live_stock is not None:
+                    estimated_stock = int(live_stock)
+                    stock_source = "live_inventory"
+                else:
+                    estimated_stock = round(avg_weekly * 8)  # 8 weeks coverage
+                    stock_source = "burn_rate_estimate"
                 coverage_weeks = round(estimated_stock / avg_weekly, 1) if avg_weekly > 0 else 99
                 skus.append({
                     "sku_id": r["sku_id"],
@@ -214,6 +248,7 @@ class StockAdvisorAgent:
                     "total_units_13w": int(r["total_units_13w"] or 0),
                     "weeks_active": int(r["weeks_active"] or 0),
                     "estimated_stock": estimated_stock,
+                    "stock_source": stock_source,
                     "coverage_weeks": coverage_weeks,
                 })
 
@@ -449,6 +484,7 @@ class StockAdvisorAgent:
                 "category": stock.get("category") or forecast.get("category", ""),
                 "sub_category": stock.get("sub_category", ""),
                 "current_stock": estimated_stock,
+                "stock_source": stock.get("stock_source", "burn_rate_estimate"),
                 "avg_weekly_demand": round(avg_weekly, 1),
                 "coverage_weeks": round(coverage_weeks, 1),
                 "projected_monthly_demand": round(monthly_demand, 1),

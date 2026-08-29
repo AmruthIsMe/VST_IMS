@@ -19,6 +19,7 @@ built (Expert A data → Expert B data → math → conclusion).
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -109,6 +110,40 @@ class GenieEngine:
 
         sanitized = validation.get("sanitized", message)
 
+        # ── Step 1.5: Small-talk & relevance gates ──────────────────
+        # Greetings / meta questions never need agents or LLM planning.
+        if self._is_smalltalk(sanitized):
+            response_text = self.guardrails.validate_output(
+                self._general_response(sanitized, db)
+            )
+            return {
+                "response": response_text,
+                "intent": "general",
+                "confidence": {"level": "high", "tag": "🔒 Meta",
+                               "description": "Built-in help/greeting response."},
+                "conversation_id": conversation_id,
+                "data_sources": [],
+                "reasoning_trace": {},
+                "data": None,
+            }
+        if not self._looks_relevant(sanitized):
+            response_text = (
+                "I'm not sure that question relates to VST inventory, products, "
+                "suppliers or demand forecasting — which is all I know about.\n\n"
+                "Try something like: *\"Which SKUs will stock out in the next 8 weeks?\"* "
+                "or *\"How many SKUs are there per category?\"*"
+            )
+            return {
+                "response": response_text,
+                "intent": "general",
+                "confidence": {"level": "low", "tag": "🤖 Off-scope",
+                               "description": "Question outside Genie's inventory scope."},
+                "conversation_id": conversation_id,
+                "data_sources": [],
+                "reasoning_trace": {},
+                "data": None,
+            }
+
         # ── Step 2: Plan (which agents?) ────────────────────────────
         plan = self._plan(sanitized)
         agents = plan.get("agents", ["sql"])
@@ -136,7 +171,7 @@ class GenieEngine:
                     combined_text_parts.append(result["summary"]["text"])
 
             elif agent_name == "what_if":
-                result = self._run_what_if(sanitized)
+                result = self._run_what_if(sanitized, db)
                 trace["what_if"] = result
                 data_sources.extend(result.get("data_sources", []))
                 if result.get("summary", {}).get("text"):
@@ -164,13 +199,14 @@ class GenieEngine:
         # Determine intent for the frontend
         intent = self._infer_intent(primary, trace)
 
-        # ── Step 7: Save to conversation history ────────────────────
-        self.conversations[conversation_id].append({
+        # ── Step 7: Save to conversation history (capped) ───────────
+        history = self.conversations[conversation_id]
+        history.append({
             "role": "user",
             "content": message,
             "timestamp": datetime.now().isoformat(),
         })
-        self.conversations[conversation_id].append({
+        history.append({
             "role": "assistant",
             "content": response_text,
             "intent": intent,
@@ -183,6 +219,8 @@ class GenieEngine:
             },
             "timestamp": datetime.now().isoformat(),
         })
+        if len(history) > 100:  # memory guardrail
+            del history[:-100]
 
         return {
             "response": response_text,
@@ -217,12 +255,20 @@ class GenieEngine:
         return agent.run(message, db)
 
     def _run_stock_advisor(self, message: str, db: Session) -> dict:
-        agent = get_stock_advisor()
-        return agent.run(message, db)
+        try:
+            agent = get_stock_advisor()
+            return agent.run(message, db)
+        except Exception as e:
+            logger.error("Stock advisor crashed: %s", e)
+            return {"error": str(e), "summary": {}, "data_sources": []}
 
-    def _run_what_if(self, message: str) -> dict:
-        agent = get_what_if_agent()
-        return agent.run(message)
+    def _run_what_if(self, message: str, db: Session = None) -> dict:
+        try:
+            agent = get_what_if_agent()
+            return agent.run(message, db=db)
+        except Exception as e:
+            logger.error("What-if agent crashed: %s", e)
+            return {"error": str(e), "summary": {}, "data_sources": []}
 
     # ── Planner (Gemini or rule-based) ──────────────────────────────
     def _plan(self, message: str) -> dict:
@@ -396,6 +442,37 @@ class GenieEngine:
         )
 
     # ── Helpers ──────────────────────────────────────────────────────
+    _SMALLTALK_TOKENS = (
+        "hello", "hi ", "hey", "thanks", "thank you", "thank",
+        "bye", "goodbye", "help", "what can you", "who are you",
+    )
+
+    @classmethod
+    def _is_smalltalk(cls, message: str) -> bool:
+        """Greetings / meta questions that need no data."""
+        q = message.lower().strip()
+        if len(q) > 80:
+            return False
+        return any(tok in q for tok in cls._SMALLTALK_TOKENS)
+
+    @staticmethod
+    def _looks_relevant(message: str) -> bool:
+        """Heuristic relevance gate: does the message plausibly relate to
+        inventory/supply-chain topics? Prevents confident nonsense answers
+        to gibberish or unrelated input."""
+        from app.genie.guardrails import ALLOWED_TOPICS
+
+        q = message.lower().strip()
+        words = [w for w in re.split(r"[^a-zA-Z0-9]+", q) if w]
+        has_topic = any(topic in q for topic in ALLOWED_TOPICS)
+        # A topic plus at least a second word, or an explicit question starter
+        if has_topic and len(words) >= 2:
+            return True
+        starters = ("how ", "what ", "which ", "when ", "where ", "who ",
+                    "why ", "list ", "show ", "compare ", "give me ",
+                    "find ", "tell me ")
+        return any(q.startswith(s) for s in starters)
+
     def _format_sql_result(self, result: dict) -> str:
         """Format SQL rows as a markdown table."""
         rows = result.get("rows", [])

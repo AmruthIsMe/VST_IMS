@@ -4,6 +4,7 @@ from uuid import UUID
 from app.database import get_db
 from app.models import Supplier
 from app.schemas import SupplierCreate, SupplierUpdate, SupplierResponse, PaginatedResponse
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
 
@@ -48,7 +49,7 @@ def get_supplier(supplier_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=SupplierResponse, status_code=201)
-def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
+def create_supplier(data: SupplierCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     existing = db.query(Supplier).filter(Supplier.supplier_id == data.supplier_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Supplier ID already exists")
@@ -60,7 +61,7 @@ def create_supplier(data: SupplierCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{supplier_id}", response_model=SupplierResponse)
-def update_supplier(supplier_id: UUID, data: SupplierUpdate, db: Session = Depends(get_db)):
+def update_supplier(supplier_id: UUID, data: SupplierUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -72,7 +73,7 @@ def update_supplier(supplier_id: UUID, data: SupplierUpdate, db: Session = Depen
 
 
 @router.delete("/{supplier_id}")
-def delete_supplier(supplier_id: UUID, db: Session = Depends(get_db)):
+def delete_supplier(supplier_id: UUID, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")

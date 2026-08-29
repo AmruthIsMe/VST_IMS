@@ -9,6 +9,7 @@ echo.
 set ROOT=%~dp0
 set BACKEND=%ROOT%backend
 set FRONTEND=%ROOT%frontend
+set SAP_MOCK=%ROOT%sap_mock_erp
 set URL=http://localhost:5173
 
 REM ---------- Step 1: Backend virtual env ----------
@@ -44,32 +45,42 @@ if not exist "%BACKEND%\vst_ims.db" (
     )
 )
 
-echo [4/4] Starting VST IMS...
+echo [4/4] Starting all services...
 echo.
 
-REM ---------- Step 3: Check if backend already running (port 8000) ----------
+REM ---------- Backend (port 8000) ----------
 curl -s -o nul -w "%%{http_code}" http://127.0.0.1:8000/api/health > "%TEMP%\vst_bk.txt" 2>nul
 set /p BKCODE=<"%TEMP%\vst_bk.txt"
 if "%BKCODE%"=="200" (
     echo    Backend already running on port 8000 - reusing it.
 ) else (
     start "VST IMS - Backend (API)" cmd /k "cd /d %BACKEND% && venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000"
-    echo    Backend started in new window.
+    echo    Backend started on port 8000.
 )
 
-REM ---------- Step 4: Check if frontend already running (port 5173) ----------
+REM ---------- Frontend (port 5173) ----------
 curl -s -o nul -w "%%{http_code}" http://localhost:5173 > "%TEMP%\vst_fe.txt" 2>nul
 set /p FECODE=<"%TEMP%\vst_fe.txt"
 if "%FECODE%"=="200" (
     echo    Frontend already running on port 5173 - reusing it.
 ) else (
     start "VST IMS - Frontend (React)" cmd /k "cd /d %FRONTEND% && npm run dev"
-    echo    Frontend started in new window.
+    echo    Frontend started on port 5173.
 )
 
-REM ---------- Step 5: Wait until frontend is ready (up to 60s) ----------
+REM ---------- SAP Mock ERP (port 8001) ----------
+curl -s -o nul -w "%%{http_code}" http://127.0.0.1:8001/sap/status > "%TEMP%\vst_sap.txt" 2>nul
+set /p SAPCODE=<"%TEMP%\vst_sap.txt"
+if "%SAPCODE%"=="200" (
+    echo    SAP Mock ERP already running on port 8001 - reusing it.
+) else (
+    start "SAP Mock ERP (Port 8001)" cmd /k "cd /d %SAP_MOCK% && ..\backend\venv\Scripts\python.exe run_sap_erp.py"
+    echo    SAP Mock ERP started on port 8001.
+)
+
+REM ---------- Wait until frontend is ready (up to 60s) ----------
 echo.
-echo Waiting for frontend to be ready...
+echo Waiting for services to be ready...
 set /a TRIES=0
 :waitloop
 set /a TRIES+=1
@@ -81,10 +92,10 @@ timeout /t 1 /nobreak >nul
 goto waitloop
 
 :ready
-echo Frontend is ready! Opening browser...
+echo All services ready! Opening browser...
 echo.
 
-REM ---------- Step 6: Open Chrome (fallback to default browser) ----------
+REM ---------- Open Chrome (fallback to default browser) ----------
 if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
     start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" %URL%
     goto opened
@@ -104,12 +115,11 @@ echo.
 echo =====================================================
 echo    VST IMS is running!
 echo.
-echo    Frontend : %URL%
-echo    Backend  : http://localhost:8000
-echo    API Docs : http://localhost:8000/docs
-echo.
-echo    You can close this window. The app runs in the
-echo    two new terminal windows that opened.
+echo    Frontend     : %URL%
+echo    Backend      : http://localhost:8000
+echo    API Docs     : http://localhost:8000/docs
+echo    SAP Mock ERP : http://localhost:8001
+echo    SAP Web UI   : http://localhost:8001
 echo =====================================================
 echo.
 pause

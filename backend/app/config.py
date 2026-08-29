@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Deployment mode: "local" (full ML) or "cloud" (pre-computed predictions only)
     DEPLOYMENT_MODE: str = "local"
 
-    SECRET_KEY: str = "vst-ims-secret-key-change-in-production"
+    SECRET_KEY: str = "CHANGE-ME-IN-PRODUCTION"
     ALGORITHM: str = "HS256"
     CORS_ORIGINS: list[str] = [
         "https://vst-ims.vercel.app",
@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     SAP_USER: str = ""
     SAP_PASSWORD: str = ""
     SAP_LANG: str = "EN"
+    SAP_MOCK_URL: str = "http://localhost:8001"
+    GEMINI_API_KEY: str = ""
+    DATA_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -47,7 +50,10 @@ class Settings(BaseSettings):
                 return [i.strip() for i in v.split(",")]
         return v
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_file": os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
+        "extra": "ignore",
+    }
 
 
 @lru_cache

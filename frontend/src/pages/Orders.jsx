@@ -29,7 +29,7 @@ function mapOrder(o) {
   };
 }
 
-export default function Orders() {
+export default function Orders({ onMenuToggle }) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState('active');
   const [page, setPage] = useState(1);
@@ -85,7 +85,7 @@ export default function Orders() {
 
   return (
     <div>
-      <Header />
+      <Header onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
         {/* Page Banner Title */}

@@ -11,7 +11,10 @@ import logging
 import re
 from typing import Optional
 
+from sqlalchemy.orm import Session
+
 from app.genie.what_if import get_simulator
+from app.genie.guardrails import GenieGuardrails
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +45,12 @@ class WhatIfAgent:
 
     def __init__(self):
         self.simulator = get_simulator()
+        self.guardrails = GenieGuardrails()
 
-    def run(self, question: str) -> dict:
+    def run(self, question: str, db: Session = None) -> dict:
         """
         Detect the scenario type from the question, extract parameters,
-        and delegate to the simulator.
+        and delegate to the simulator (using the live DB when available).
 
         Returns a dict with:
           tool:          which tool was invoked
@@ -76,7 +80,7 @@ class WhatIfAgent:
             }
 
         # Invoke the simulator
-        result = self._invoke_simulator(tool_type, params)
+        result = self._invoke_simulator(tool_type, params, db)
 
         return {
             "tool": tool_type,
@@ -139,56 +143,72 @@ class WhatIfAgent:
         return None
 
     def _extract_supplier_params(self, q: str) -> dict:
-        params = {"failure_weeks": self._extract_number(q, default=8)}
+        params = {
+            "failure_weeks": self.guardrails.clamp_number(
+                self._extract_number(q, default=8), 1, 104, 8)
+        }
         country = self._extract_country(q)
         if country:
             params["origin_country"] = country
         sup_match = re.search(r"SUP-\w+-\d+", q, re.IGNORECASE)
         if sup_match:
-            params["supplier_id"] = sup_match.group(0)
+            params["supplier_id"] = sup_match.group(0).upper()
         return params
 
     def _extract_lead_time_params(self, q: str) -> dict:
-        params = {"additional_days": self._extract_number(q, default=15)}
+        params = {
+            "additional_days": int(self.guardrails.clamp_number(
+                self._extract_number(q, default=15), 0, 365, 15))
+        }
         country = self._extract_country(q)
         if country:
             params["origin_country"] = country
         return params
 
     def _extract_shelf_life_params(self, q: str) -> dict:
-        params = {"threshold_days": self._extract_number(q, default=90)}
+        params = {
+            "threshold_days": int(self.guardrails.clamp_number(
+                self._extract_number(q, default=90), 7, 3650, 90))
+        }
         return params
 
     def _extract_demand_spike_params(self, q: str) -> dict:
-        params = {"spike_percent": float(self._extract_number(q, default=20))}
+        params = {
+            "spike_percent": float(self.guardrails.clamp_number(
+                self._extract_number(q, default=20), -80, 500, 20))
+        }
         cat = self._extract_category(q)
         if cat:
             params["category"] = cat
         return params
 
     # ── Simulator invocation ────────────────────────────────────────
-    def _invoke_simulator(self, tool_type: str, params: dict) -> dict:
+    def _invoke_simulator(self, tool_type: str, params: dict, db: Session = None) -> dict:
         try:
             if tool_type == "lead_time":
                 return self.simulator.lead_time_impact(
                     supplier_id=params.get("supplier_id"),
                     origin_country=params.get("origin_country"),
                     additional_days=params.get("additional_days", 15),
+                    db=db,
                 )
             elif tool_type == "demand_spike":
                 return self.simulator.demand_spike_impact(
                     category=params.get("category"),
                     spike_percent=params.get("spike_percent", 20),
+                    db=db,
                 )
             elif tool_type == "shelf_life":
                 return self.simulator.shelf_life_risk(
                     threshold_days=params.get("threshold_days", 90),
+                    db=db,
                 )
             elif tool_type == "supplier_failure":
                 return self.simulator.supplier_failure(
                     supplier_id=params.get("supplier_id"),
                     origin_country=params.get("origin_country"),
                     failure_weeks=params.get("failure_weeks", 8),
+                    db=db,
                 )
             else:
                 return {"error": f"Unknown tool: {tool_type}"}

@@ -117,10 +117,7 @@ class SqlAgent:
 
         prompt = self._system_prompt + "\n\n" + user_msg
         try:
-            import asyncio
-            response = asyncio.get_event_loop().run_until_complete(
-                asyncio.to_thread(model.generate_content, prompt)
-            ) if False else model.generate_content(prompt)
+            response = model.generate_content(prompt)
             raw = response.text.strip()
         except Exception as e:
             logger.warning("Gemini SQL generation failed: %s", e)
@@ -279,11 +276,20 @@ Return ONLY the raw, executable SQL query. Do not wrap it in markdown formatting
                     "FROM sales WHERE sale_date >= date('now', '-90 days');")
 
         # low stock / critical items
-        if "low stock" in q or "critical" in q or "stockout" in q:
+        if "low stock" in q or "lowest stock" in q or "critical" in q or "stockout" in q:
             return ("SELECT p.sku_id, p.category, p.sub_category, "
-                    "i.quantity_on_hand, i.unit_cost_inr "
+                    "i.quantity_available, i.quantity_on_hand, i.unit_cost_inr "
                     "FROM products p JOIN inventory i ON p.sku_id = i.sku_id "
-                    "ORDER BY i.quantity_on_hand ASC LIMIT 15;")
+                    "ORDER BY i.quantity_available ASC LIMIT 15;")
+
+        # current stock for a specific SKU
+        import re as _re
+        sku_m = _re.search(r"\b([A-Z]{2}-[A-Z]{3}-\d{4})\b", question.upper())
+        if sku_m and any(k in q for k in ["stock", "available", "on hand", "inventory", "how many"]):
+            s = sku_m.group(1)
+            return ("SELECT i.sku_id, i.quantity_on_hand, i.quantity_reserved, "
+                    f"i.quantity_available, i.last_sap_sync_at FROM inventory i "
+                    f"WHERE i.sku_id = '{s}';")
 
         # shelf life / expiring
         if "shelf life" in q or "expir" in q:

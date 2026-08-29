@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, Literal
 
 
 class ProductBase(BaseModel):
@@ -86,14 +86,14 @@ class UserCreate(BaseModel):
     name: str
     email: str
     password: str
-    role: str = "Viewer"
+    role: Literal["Admin", "Manager", "Cashier", "Viewer"] = "Viewer"
 
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
-    role: Optional[str] = None
-    status: Optional[str] = None
+    role: Optional[Literal["Admin", "Manager", "Cashier", "Viewer"]] = None
+    status: Optional[Literal["Active", "Inactive", "Suspended"]] = None
 
 
 class UserResponse(BaseModel):
@@ -195,7 +195,7 @@ class ChartData(BaseModel):
 
 
 class SapSyncRequest(BaseModel):
-    sync_type: str  # materials, vendors, stocks, orders, sales
+    sync_type: Literal["materials", "vendors", "stocks", "orders", "sales"]
 
 
 class SapSyncResponse(BaseModel):

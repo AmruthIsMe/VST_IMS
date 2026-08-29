@@ -12,10 +12,11 @@ from app.models import Product, Supplier, Order, Sale, Forecast, Inventory
 from app.schemas import DashboardKPI, ChartData
 from app.forecasting.data_pipeline import SKU_CATEGORY_PREFIX
 from app.forecasting.constants import get_risk_level
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+DATA_DIR = Path(get_settings().DATA_DIR)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -176,8 +177,8 @@ def stockout_risk(weeks_ahead: int = 12, db: Session = Depends(get_db)):
     products_df = pd.DataFrame(prod_rows, columns=["sku_id", "category", "sub_category"]) if prod_rows else pd.DataFrame(columns=["sku_id", "category", "sub_category"])
 
     # --- 4. Compute demand stats for all SKUs ---
-    max_date = sales_df["sale_date"].max()
-    cutoff_13w = max_date - pd.Timedelta(weeks=13)
+    today_ts = pd.Timestamp(date.today())
+    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
     recent = sales_df[sales_df["sale_date"] >= cutoff_13w].copy()
 
     sku_stats = recent.groupby("sku_id").agg(
@@ -187,8 +188,8 @@ def stockout_risk(weeks_ahead: int = 12, db: Session = Depends(get_db)):
     sku_stats = sku_stats[sku_stats["weeks_active"] >= 2].copy()
 
     # Demand trend: last 4w vs prev 4w
-    cutoff_4w = max_date - pd.Timedelta(weeks=4)
-    cutoff_8w = max_date - pd.Timedelta(weeks=8)
+    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
     recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
     prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
     sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
@@ -298,14 +299,7 @@ def _load_sales_products():
             pass
 
         if sales_df is None or len(sales_df) == 0:
-            csv_path = DATA_DIR / "fact_sales.csv"
-            products_path = DATA_DIR / "dim_products.csv"
-            if csv_path.exists():
-                sales_df = pd.read_csv(csv_path, parse_dates=["Date"])
-                sales_df.rename(columns={"Date": "sale_date", "SKU_ID": "sku_id", "Units_Sold": "units_sold"}, inplace=True)
-            if products_path.exists():
-                products_df = pd.read_csv(products_path)
-                products_df.rename(columns={"SKU_ID": "sku_id", "Category": "category", "Sub_Category": "sub_category"}, inplace=True)
+            logger.warning("No sales data found in database")
     finally:
         db.close()
 
@@ -322,7 +316,7 @@ def category_forecast():
     if sales_df is None or len(sales_df) == 0:
         return {"status": "error", "message": "No sales data"}
 
-    max_date = sales_df["sale_date"].max()
+    today_ts = pd.Timestamp(date.today())
 
     # Merge category
     if products_df is not None and len(products_df) > 0:
@@ -333,16 +327,18 @@ def category_forecast():
     sales_df["category"] = sales_df["category"].fillna("Unknown")
 
     # Recent 13 weeks per category
-    cutoff_13w = max_date - pd.Timedelta(weeks=13)
+    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
     recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
     cat_stats = recent.groupby("category").agg(
-        avg_weekly=("units_sold", "mean"),
         total_13w=("units_sold", "sum"),
     ).reset_index()
+    weekly_totals = recent.groupby(["category", "sale_date"])["units_sold"].sum().reset_index()
+    avg_weekly_map = weekly_totals.groupby("category")["units_sold"].mean()
+    cat_stats["avg_weekly"] = cat_stats["category"].map(avg_weekly_map).fillna(0)
 
     # Trend: last 4w vs prev 4w
-    cutoff_4w = max_date - pd.Timedelta(weeks=4)
-    cutoff_8w = max_date - pd.Timedelta(weeks=8)
+    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
     recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("category")["units_sold"].sum()
     prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("category")["units_sold"].sum()
     cat_stats["recent_4w"] = cat_stats["category"].map(recent_4w).fillna(0)

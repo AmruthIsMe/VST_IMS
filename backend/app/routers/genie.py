@@ -10,7 +10,7 @@ Endpoints:
   POST /api/genie/export-csv    — export stock advisory shortfall table as CSV download
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -19,12 +19,16 @@ from datetime import date
 import csv
 import io
 import logging
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.database import get_db
 from app.genie.engine import get_genie_engine
+from app.routers.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/genie", tags=["genie"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Request / Response models ─────────────────────────────────────────
@@ -52,7 +56,8 @@ class WhatIfRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chat(http_request: Request, request: ChatRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """
     Send a message to Genie.  The engine routes to the appropriate agent
     (SQL Expert, Stock Advisor, What-If Simulator) and returns a
@@ -84,7 +89,7 @@ async def get_suggestions(db: Session = Depends(get_db)):
 
 
 @router.post("/what-if")
-async def run_what_if(request: WhatIfRequest, db: Session = Depends(get_db)):
+async def run_what_if(request: WhatIfRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """
     Run a structured what-if scenario simulation directly (without chat).
     Useful for programmatic access or the What-If simulator page.
@@ -93,27 +98,33 @@ async def run_what_if(request: WhatIfRequest, db: Session = Depends(get_db)):
     simulator = get_simulator()
     params = request.parameters
 
+    # Guardrail: clamp numeric parameters into sane ranges
+    g = get_genie_engine().guardrails
     try:
         if request.scenario_type == "lead_time":
             result = simulator.lead_time_impact(
                 supplier_id=params.get("supplier_id"),
                 origin_country=params.get("origin_country", "China"),
-                additional_days=params.get("additional_days", 15),
+                additional_days=int(g.clamp_number(params.get("additional_days", 15), 0, 365, 15)),
+                db=db,
             )
         elif request.scenario_type == "demand_spike":
             result = simulator.demand_spike_impact(
                 category=params.get("category"),
-                spike_percent=params.get("spike_percent", 20),
+                spike_percent=float(g.clamp_number(params.get("spike_percent", 20), -80, 500, 20)),
+                db=db,
             )
         elif request.scenario_type == "shelf_life":
             result = simulator.shelf_life_risk(
-                threshold_days=params.get("threshold_days", 90),
+                threshold_days=int(g.clamp_number(params.get("threshold_days", 90), 7, 3650, 90)),
+                db=db,
             )
         elif request.scenario_type == "supplier_failure":
             result = simulator.supplier_failure(
                 supplier_id=params.get("supplier_id"),
                 origin_country=params.get("origin_country"),
-                failure_weeks=params.get("failure_weeks", 8),
+                failure_weeks=int(g.clamp_number(params.get("failure_weeks", 8), 1, 104, 8)),
+                db=db,
             )
         else:
             return {"status": "error", "message": f"Unknown scenario type: {request.scenario_type}"}

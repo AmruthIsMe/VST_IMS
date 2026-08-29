@@ -6,7 +6,7 @@ import { Truck, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 
 const EMPTY = { supplier_id: '', supplier_name: '', origin_country: 'India', primary_category: '', base_lead_time_days: '14', lead_time_volatility: '0.1', moq: '100', unit_cost_inr: '1000', email: '', phone: '', address: '', sap_vendor_id: '' };
 
-export default function Suppliers() {
+export default function Suppliers({ onMenuToggle }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -28,7 +28,7 @@ export default function Suppliers() {
 
   return (
     <div>
-      <Header />
+      <Header onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
         {/* Page Banner Title */}

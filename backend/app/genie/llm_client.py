@@ -5,7 +5,14 @@ Why a separate module:
 - Avoids every agent re-implementing the lazy `import google.generativeai`
   boilerplate.
 - Centralises the model-name and API-key handling.
-- Lets us swap model names in one place (e.g. `gemini-2.0-flash` -> `gemini-1.5-pro`).
+- Lets us swap model names in one place.
+
+Key resolution order:
+  1. GEMINI_API_KEY environment variable (production / shell export)
+  2. backend/.env file via pydantic Settings (local dev)
+
+If no key or SDK is available the caller falls back to deterministic
+rule-based mode — Genie never hard-fails because of a missing key.
 """
 
 import logging
@@ -14,9 +21,23 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+MODEL_CANDIDATES = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 _model: Optional[object] = None
+
+
+def _resolve_api_key() -> str:
+    """Find the Gemini API key: env var first, then backend/.env."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if api_key:
+        return api_key
+    try:
+        from app.config import get_settings
+
+        api_key = (getattr(get_settings(), "GEMINI_API_KEY", "") or "").strip()
+    except Exception:
+        pass
+    return api_key
 
 
 def get_gemini_model():
@@ -31,15 +52,15 @@ def get_gemini_model():
         logger.warning("google-generativeai not installed - Genie will use offline mode")
         return None
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = _resolve_api_key()
     if not api_key:
         logger.warning("GEMINI_API_KEY not set - Genie will use offline mode")
         return None
 
     try:
         genai.configure(api_key=api_key)
-        _model = genai.GenerativeModel(DEFAULT_MODEL)
-        logger.info("Gemini initialised: %s", DEFAULT_MODEL)
+        _model = genai.GenerativeModel(MODEL_CANDIDATES[0])
+        logger.info("Gemini initialised: %s", MODEL_CANDIDATES[0])
         return _model
     except Exception as e:
         logger.warning("Gemini init failed: %s", e)

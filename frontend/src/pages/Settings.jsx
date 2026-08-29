@@ -3,7 +3,7 @@ import Header from '../components/Header';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-export default function Settings() {
+export default function Settings({ onMenuToggle }) {
   const { theme, toggleTheme, notifications, setNotifications } = useApp();
   const [name, setName] = useState('Admin User');
   const [email, setEmail] = useState('admin@vst.com');
@@ -17,7 +17,7 @@ export default function Settings() {
 
   return (
     <div>
-      <Header />
+      <Header onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
         <div className="page-banner">

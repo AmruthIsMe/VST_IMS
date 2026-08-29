@@ -5,6 +5,7 @@ from datetime import date
 from app.database import get_db
 from app.models import Order, OrderItem
 from app.schemas import OrderCreate, OrderUpdate, OrderResponse, OrderItemResponse, PaginatedResponse
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -52,7 +53,7 @@ def get_order(order_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=OrderResponse, status_code=201)
-def create_order(data: OrderCreate, db: Session = Depends(get_db)):
+def create_order(data: OrderCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     existing = db.query(Order).filter(Order.order_id == data.order_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Order ID already exists")
@@ -78,7 +79,7 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{order_id}", response_model=OrderResponse)
-def update_order(order_id: UUID, data: OrderUpdate, db: Session = Depends(get_db)):
+def update_order(order_id: UUID, data: OrderUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -90,7 +91,7 @@ def update_order(order_id: UUID, data: OrderUpdate, db: Session = Depends(get_db
 
 
 @router.delete("/{order_id}")
-def delete_order(order_id: UUID, db: Session = Depends(get_db)):
+def delete_order(order_id: UUID, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")

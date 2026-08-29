@@ -6,7 +6,7 @@ import { Users as UsersIcon, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 
 const EMPTY = { user_id: '', name: '', email: '', password: '', role: 'Viewer' };
 
-export default function Users() {
+export default function Users({ onMenuToggle }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -29,7 +29,7 @@ export default function Users() {
 
   return (
     <div>
-      <Header />
+      <Header onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
         <div className="page-banner">

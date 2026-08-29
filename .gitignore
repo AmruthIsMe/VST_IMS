@@ -62,3 +62,6 @@ Builds/
 
 # Misc
 anaconda_projects/
+
+# Temporary agent workspace (knowledge graph, reports)
+TEMP/

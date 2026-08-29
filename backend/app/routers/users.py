@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserUpdate, UserResponse, PaginatedResponse
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -18,6 +19,7 @@ def list_users(
     role: str = "",
     status: str = "",
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     query = db.query(User)
 
@@ -45,7 +47,7 @@ def list_users(
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user(user_id: UUID, db: Session = Depends(get_db)):
+def get_user(user_id: UUID, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -53,7 +55,7 @@ def get_user(user_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=UserResponse, status_code=201)
-def create_user(data: UserCreate, db: Session = Depends(get_db)):
+def create_user(data: UserCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     existing = db.query(User).filter(
         (User.user_id == data.user_id) | (User.email == data.email)
     ).first()
@@ -74,7 +76,7 @@ def create_user(data: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{user_id}", response_model=UserResponse)
-def update_user(user_id: UUID, data: UserUpdate, db: Session = Depends(get_db)):
+def update_user(user_id: UUID, data: UserUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -86,7 +88,7 @@ def update_user(user_id: UUID, data: UserUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{user_id}")
-def delete_user(user_id: UUID, db: Session = Depends(get_db)):
+def delete_user(user_id: UUID, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

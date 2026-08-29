@@ -5,6 +5,10 @@ from uuid import UUID
 from app.database import get_db
 from app.models import Product, Inventory
 from app.schemas import ProductCreate, ProductUpdate, ProductResponse, PaginatedResponse
+from app.routers.auth import get_current_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -61,6 +65,7 @@ def list_products(
                 for sku_id, qty in inv_rows:
                     stock_map[sku_id] = qty or 0
         except Exception:
+            logger.warning("Failed to fetch stock map for products")
             db.rollback()
 
         response_items = []
@@ -90,7 +95,7 @@ def list_products(
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch products")
 
 
 @router.get("/categories")
@@ -108,7 +113,7 @@ def get_product(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=ProductResponse, status_code=201)
-def create_product(data: ProductCreate, db: Session = Depends(get_db)):
+def create_product(data: ProductCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     existing = db.query(Product).filter(Product.sku_id == data.sku_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="SKU already exists")
@@ -120,7 +125,7 @@ def create_product(data: ProductCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
-def update_product(product_id: UUID, data: ProductUpdate, db: Session = Depends(get_db)):
+def update_product(product_id: UUID, data: ProductUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -132,7 +137,7 @@ def update_product(product_id: UUID, data: ProductUpdate, db: Session = Depends(
 
 
 @router.delete("/{product_id}")
-def delete_product(product_id: UUID, db: Session = Depends(get_db)):
+def delete_product(product_id: UUID, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")

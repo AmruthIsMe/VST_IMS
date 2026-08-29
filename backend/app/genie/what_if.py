@@ -35,16 +35,27 @@ class WhatIfSimulator:
         self._sales: Optional[pd.DataFrame] = None
 
     # ── Data loading (lazy, cached per-instance) ──────────────────────
-    def _load_data(self):
-        if self._products is None:
-            self._products = load_products_data()
-        if self._suppliers is None:
-            self._suppliers = load_suppliers_data()
-        if self._sales is None:
+    def _load_data(self, db=None):
+        """Load products/suppliers from CSV dims and sales from the LIVE DB
+        when a session is provided (CSV only as last resort)."""
+        if self._sales is None or db is not None:
             try:
-                self._sales = load_sales_data()
+                df = load_sales_data(db)
+                if db is not None or self._sales is None:
+                    self._sales = df
             except Exception:
-                self._sales = pd.DataFrame()
+                if self._sales is None:
+                    self._sales = pd.DataFrame()
+        if self._products is None:
+            try:
+                self._products = load_products_data()
+            except Exception:
+                self._products = pd.DataFrame()
+        if self._suppliers is None:
+            try:
+                self._suppliers = load_suppliers_data()
+            except Exception:
+                self._suppliers = pd.DataFrame()
 
     # ── Burn-rate + stock helpers ─────────────────────────────────────
     def _burn_rates(self, weeks: int = 13) -> dict:
@@ -88,9 +99,10 @@ class WhatIfSimulator:
         supplier_id: str = None,
         origin_country: str = None,
         additional_days: int = 15,
+        db=None,
     ) -> dict:
         """If lead time from supplier/country rises by X days, which SKUs shortfall?"""
-        self._load_data()
+        self._load_data(db)
         suppliers, products = self._suppliers, self._products
         if suppliers is None or products is None or len(suppliers) == 0:
             return {"scenario": "Lead time impact", "error": "Supplier / product data unavailable"}
@@ -155,9 +167,10 @@ class WhatIfSimulator:
         self,
         category: str = None,
         spike_percent: float = 20.0,
+        db=None,
     ) -> dict:
         """If demand for a category grows by X%, which SKUs run short?"""
-        self._load_data()
+        self._load_data(db)
         products = self._products
         if products is None or len(products) == 0:
             return {"scenario": "Demand spike", "error": "Product data unavailable"}
@@ -198,9 +211,9 @@ class WhatIfSimulator:
         }
 
     # ── Scenario: shelf-life / expiry risk ────────────────────────────
-    def shelf_life_risk(self, threshold_days: int = 90) -> dict:
+    def shelf_life_risk(self, threshold_days: int = 90, db=None) -> dict:
         """Identify items whose shelf life is at risk of expiry."""
-        self._load_data()
+        self._load_data(db)
         products = self._products
         if products is None or len(products) == 0:
             return {"scenario": "Shelf-life risk", "error": "Product data unavailable"}
@@ -249,9 +262,10 @@ class WhatIfSimulator:
         supplier_id: str = None,
         origin_country: str = None,
         failure_weeks: int = 8,
+        db=None,
     ) -> dict:
         """If a supplier/country is unavailable for X weeks, which SKUs stockout?"""
-        self._load_data()
+        self._load_data(db)
         suppliers, products = self._suppliers, self._products
         if suppliers is None or products is None:
             return {"scenario": "Supplier failure", "error": "Data unavailable"}

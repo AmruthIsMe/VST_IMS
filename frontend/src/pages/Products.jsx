@@ -54,7 +54,7 @@ const CATEGORY_DATA = [
   },
 ];
 
-export default function Products() {
+export default function Products({ onMenuToggle }) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState('products');
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -232,7 +232,7 @@ export default function Products() {
 
   return (
     <div>
-      <Header />
+      <Header onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
         {/* Page Banner Title */}

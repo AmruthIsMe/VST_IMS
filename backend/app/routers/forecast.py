@@ -24,6 +24,7 @@ from app.config import get_settings
 from app.forecasting.data_pipeline import load_products_data, SKU_CATEGORY_PREFIX
 from app.forecasting.constants import get_stockout_severity, get_risk_level
 from app.models import Inventory, Product
+from app.routers.auth import get_current_user
 
 # --- Conditional ML imports (not available in cloud deployment) ---
 try:
@@ -36,8 +37,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/forecast", tags=["forecast"])
-DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 DEPLOYMENT_MODE = get_settings().DEPLOYMENT_MODE
+DATA_DIR = Path(get_settings().DATA_DIR)
+
+
+@router.get("/training-status")
+async def get_training_status():
+    """Real-time per-model training progress. Poll every 2s during retrain."""
+    from app.forecasting import training_progress
+    return training_progress.get_status()
 
 
 @router.post("/train")
@@ -46,6 +54,7 @@ async def train_models(
     sku_id: Optional[str] = Query(None, description="Train for specific SKU"),
     category: Optional[str] = Query(None, description="Train for specific category"),
     test_weeks: int = Query(12, description="Number of weeks for test split"),
+    current_user: dict = Depends(get_current_user),
 ):
     """Train all forecasting models and compute ensemble weights."""
     if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
@@ -272,6 +281,7 @@ async def get_ensemble_weights(db: Session = Depends(get_db)):
 async def retrain_models(
     sku_id: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Trigger re-training with RL feedback loop.
@@ -348,6 +358,92 @@ async def list_models(db: Session = Depends(get_db)):
     return {"models": models_info}
 
 
+@router.get("/training-history")
+async def get_training_history(
+    limit: int = Query(30, ge=1, le=100, description="Max runs to return (newest first)"),
+):
+    """
+    Performance drill-down: every training run with per-model metrics and
+    deltas vs the previous run, so you can see how each of the 6 models
+    changes/learns as new data arrives.
+    """
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return {
+            "status": "cloud_mode",
+            "message": "Training history is available in local mode only.",
+        }
+
+    history = get_ensemble().get_training_history()
+    if not history:
+        return {"status": "success", "runs": [], "total_runs": 0}
+
+    def _num(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    enriched = []
+    for i, run in enumerate(history):
+        prev = history[i - 1] if i > 0 else None
+
+        cur_mape = _num(run.get("ensemble_mape"))
+        prev_mape = _num(prev.get("ensemble_mape")) if prev else None
+
+        per_model = {}
+        for name, cur in (run.get("per_model") or {}).items():
+            prev_pm = (prev or {}).get("per_model", {}).get(name, {}) if prev else {}
+            cur_w = (run.get("weights") or {}).get(name)
+            prev_w = ((prev or {}).get("weights") or {}).get(name)
+            entry = {
+                "status": cur.get("status"),
+                "mape": _num(cur.get("mape")),
+                "mae": _num(cur.get("mae")),
+                "rmse": _num(cur.get("rmse")),
+                "smape": _num(cur.get("smape")),
+                "bias": _num(cur.get("bias")),
+                "weight": _num(cur_w),
+                "mape_delta": None,
+                "weight_delta": None,
+                "improved": None,
+            }
+            pm_prev = _num(prev_pm.get("mape"))
+            if entry["mape"] is not None and pm_prev is not None:
+                entry["mape_delta"] = round(pm_prev - entry["mape"], 2)  # + = error reduced
+                entry["improved"] = entry["mape_delta"] > 0
+            w_prev = _num(prev_w)
+            if entry["weight"] is not None and w_prev is not None:
+                entry["weight_delta"] = round(entry["weight"] - w_prev, 4)
+            per_model[name] = entry
+        # Fallback for legacy runs without per_model snapshots
+        if not per_model:
+            for name, w in (run.get("weights") or {}).items():
+                per_model[name] = {"status": "trained", "weight": _num(w)}
+
+        ensemble_delta = None
+        if cur_mape is not None and prev_mape is not None:
+            ensemble_delta = round(prev_mape - cur_mape, 2)
+
+        enriched.append({
+            "index": i,
+            "date": run.get("date"),
+            "models_trained": run.get("models_trained", 0),
+            "elapsed_seconds": run.get("elapsed_seconds"),
+            "ensemble_mape": cur_mape,
+            "ensemble_mape_delta": ensemble_delta,
+            "error": run.get("error"),
+            "dataset": run.get("dataset"),
+            "weights": run.get("weights") or {},
+            "per_model": per_model,
+        })
+
+    return {
+        "status": "success",
+        "runs": enriched[-limit:][::-1],  # newest first
+        "total_runs": len(enriched),
+    }
+
+
 @router.get("/summary")
 async def get_forecast_summary(db: Session = Depends(get_db)):
     """AI-generated summary of forecasting performance."""
@@ -365,6 +461,13 @@ async def get_forecast_summary(db: Session = Depends(get_db)):
     history = ensemble.get_training_history()
     latest = history[-1] if history else {}
 
+    # ensemble_mape may be a scalar (new runs) or dict (legacy)
+    raw_mape = latest.get("ensemble_mape")
+    if isinstance(raw_mape, dict):
+        latest_mape = raw_mape.get("mape", "N/A")
+    else:
+        latest_mape = raw_mape if raw_mape is not None else "N/A"
+
     # Build summary
     best_model = None
     best_mape = 999
@@ -376,13 +479,14 @@ async def get_forecast_summary(db: Session = Depends(get_db)):
     summary_parts = [
         f"📊 **Ensemble trained** with {latest.get('models_trained', 0)} models.",
         f"🏆 **Best model**: {best_model or 'N/A'} (weight: {ensemble.weights.get(best_model, 0):.1%})",
-        f"📈 **Ensemble MAPE**: {latest.get('ensemble_mape', {}).get('mape', 'N/A')}%",
+        f"📈 **Ensemble MAPE**: {latest_mape}%",
         f"⏱️ **Training time**: {latest.get('elapsed_seconds', 'N/A')}s",
     ]
 
     if len(history) > 1:
-        first_mape = history[0].get("ensemble_mape", {}).get("mape", 0)
-        last_mape = latest.get("ensemble_mape", {}).get("mape", 0)
+        first_raw = history[0].get("ensemble_mape")
+        first_mape = first_raw.get("mape") if isinstance(first_raw, dict) else first_raw
+        last_mape = latest_mape
         if first_mape and last_mape and first_mape > 0:
             improvement = (first_mape - last_mape) / first_mape * 100
             summary_parts.append(
@@ -425,12 +529,20 @@ def _get_model_description(name: str) -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 def _load_sales_csv():
-    """Load sales from CSV (shared helper)."""
-    csv_path = DATA_DIR / "fact_sales.csv"
-    if csv_path.exists():
-        df = pd.read_csv(csv_path, parse_dates=["Date"])
-        df.rename(columns={"Date": "sale_date", "SKU_ID": "sku_id", "Units_Sold": "units_sold"}, inplace=True)
-        return df
+    """Load sales from database. No CSV fallback — production-ready."""
+    from sqlalchemy import text as sa_text
+    from app.database import engine
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(
+                sa_text("SELECT sale_date, sku_id, units_sold, fulfillment_region, stockout_flag FROM sales ORDER BY sale_date"),
+                conn,
+            )
+            if len(df) > 0:
+                df["sale_date"] = pd.to_datetime(df["sale_date"])
+                return df
+    except Exception as e:
+        logger.warning(f"Failed to load sales from database: {e}")
     return None
 
 
@@ -444,34 +556,50 @@ async def list_products(
     List all products with filtering for SKU Explorer slicers.
     Returns product catalog with sales summary for preview.
     """
-    products_path = DATA_DIR / "dim_products.csv"
-    if not products_path.exists():
-        return {"status": "error", "message": "Products data not found"}
+    from app.database import SessionLocal
+    from app.models import Product
 
-    products_df = pd.read_csv(products_path)
-    products_df.rename(columns={
-        "SKU_ID": "sku_id", "Category": "category", "Sub_Category": "sub_category",
-        "Machine_Compatibility": "machine_compatibility", "Shelf_Life_Days": "shelf_life_days",
-        "Unit_Volume_m3": "unit_volume_m3",
-    }, inplace=True)
+    db = SessionLocal()
+    try:
+        products = db.query(Product).all()
+        if not products:
+            return {"status": "error", "message": "No products found in database"}
 
-    # Load sales for demand summary
+        products_df = pd.DataFrame([{
+            "sku_id": p.sku_id,
+            "category": p.category or "Unknown",
+            "sub_category": p.sub_category or "",
+            "machine_compatibility": p.machine_compatibility or "",
+            "shelf_life_days": p.shelf_life_days or 0,
+        } for p in products])
+    finally:
+        db.close()
+
     sales_df = _load_sales_csv()
-    if sales_df is not None:
-        max_date = sales_df["sale_date"].max()
-        cutoff_13w = max_date - pd.Timedelta(weeks=13)
+    if sales_df is not None and len(sales_df) > 0:
+        today_ts = pd.Timestamp(date.today())
+        cutoff_13w = today_ts - pd.Timedelta(weeks=13)
         recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
-        sku_demand = recent.groupby("sku_id").agg(
-            avg_weekly=("units_sold", "mean"),
-            total_13w=("units_sold", "sum"),
-            weeks_active=("sale_date", "nunique"),
-        ).reset_index()
-        sku_demand["avg_weekly"] = sku_demand["avg_weekly"].round(1)
-        products_df = products_df.merge(sku_demand, on="sku_id", how="left")
+        if len(recent) > 0:
+            sku_demand = recent.groupby("sku_id").agg(
+                avg_weekly=("units_sold", "mean"),
+                total_13w=("units_sold", "sum"),
+                weeks_active=("sale_date", "nunique"),
+            ).reset_index()
+            sku_demand["avg_weekly"] = sku_demand["avg_weekly"].round(1)
+            products_df = products_df.merge(sku_demand, on="sku_id", how="left")
+        else:
+            products_df["avg_weekly"] = 0
+            products_df["total_13w"] = 0
+            products_df["weeks_active"] = 0
     else:
         products_df["avg_weekly"] = 0
         products_df["total_13w"] = 0
         products_df["weeks_active"] = 0
+
+    products_df["avg_weekly"] = products_df["avg_weekly"].fillna(0).round(1)
+    products_df["total_13w"] = products_df["total_13w"].fillna(0)
+    products_df["weeks_active"] = products_df["weeks_active"].fillna(0)
 
     # Apply filters
     if category:
@@ -486,28 +614,41 @@ async def list_products(
             products_df["sub_category"].str.upper().str.contains(search_upper)
         ]
 
-    # Sort by avg weekly demand
     products_df = products_df.sort_values(["avg_weekly"], ascending=[False])
 
-    # Get unique filter values
-    all_products = pd.read_csv(products_path)
-    all_products.rename(columns={"Category": "category", "Sub_Category": "sub_category"}, inplace=True)
-    categories = sorted(all_products["category"].dropna().unique().tolist())
-    sub_categories = sorted(all_products["sub_category"].dropna().unique().tolist()) if sub_category is None else sorted(
-        all_products[all_products["category"] == category]["sub_category"].dropna().unique().tolist()
-    ) if category else sorted(all_products["sub_category"].dropna().unique().tolist())
+    # Get unique filter values from all products
+    all_products_df = pd.DataFrame([{
+        "category": p.category or "Unknown",
+        "sub_category": p.sub_category or "",
+    } for p in products]) if 'products' in dir() else products_df
+    categories = sorted(all_products_df["category"].dropna().unique().tolist())
+    sub_categories = sorted(all_products_df["sub_category"].dropna().unique().tolist()) if sub_category is None else sorted(
+        all_products_df[all_products_df["category"] == category]["sub_category"].dropna().unique().tolist()
+    ) if category else sorted(all_products_df["sub_category"].dropna().unique().tolist())
 
     results = []
     for _, row in products_df.iterrows():
+        def safe_int(val, default=0):
+            try:
+                return int(float(val)) if pd.notna(val) else default
+            except (ValueError, TypeError):
+                return default
+
+        def safe_float(val, default=0.0):
+            try:
+                return float(val) if pd.notna(val) else default
+            except (ValueError, TypeError):
+                return default
+
         results.append({
             "sku_id": row["sku_id"],
-            "category": row.get("category", "Unknown"),
-            "sub_category": row.get("sub_category", ""),
-            "machine_compatibility": row.get("machine_compatibility", ""),
-            "shelf_life_days": int(float(row.get("shelf_life_days", 0) or 0) if not pd.isna(row.get("shelf_life_days")) else 0),
-            "avg_weekly_demand": float(row.get("avg_weekly", 0) or 0),
-            "total_13w": int(row.get("total_13w", 0) or 0),
-            "weeks_active": int(row.get("weeks_active", 0) or 0),
+            "category": row.get("category", "Unknown") if pd.notna(row.get("category")) else "Unknown",
+            "sub_category": row.get("sub_category", "") if pd.notna(row.get("sub_category")) else "",
+            "machine_compatibility": row.get("machine_compatibility", "") if pd.notna(row.get("machine_compatibility")) else "",
+            "shelf_life_days": safe_int(row.get("shelf_life_days")),
+            "avg_weekly_demand": safe_float(row.get("avg_weekly")),
+            "total_13w": safe_int(row.get("total_13w")),
+            "weeks_active": safe_int(row.get("weeks_active")),
         })
 
     return {
@@ -553,8 +694,8 @@ async def sku_explorer(
             }
 
     # Historical data (last 26 weeks)
-    max_date = sku_sales["sale_date"].max()
-    hist_start = max_date - pd.Timedelta(weeks=26)
+    today_ts = pd.Timestamp(date.today())
+    hist_start = today_ts - pd.Timedelta(weeks=26)
     history = sku_sales[sku_sales["sale_date"] >= hist_start].copy()
     history["week"] = history["sale_date"].dt.isocalendar().week.astype(int)
     history["year_week"] = history["sale_date"].dt.strftime("%Y-W%U")
@@ -565,12 +706,17 @@ async def sku_explorer(
     ).reset_index().sort_values("date")
 
     # Compute forecast using EWMA trend
-    recent_13w = sku_sales[sku_sales["sale_date"] >= max_date - pd.Timedelta(weeks=13)]
+    today_ts = pd.Timestamp(date.today())
+    recent_13w = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]
     avg_weekly = recent_13w["units_sold"].mean()
     std_weekly = recent_13w["units_sold"].std()
+    if pd.isna(avg_weekly):
+        avg_weekly = 0
+    if pd.isna(std_weekly):
+        std_weekly = 0
 
-    cutoff_4w = max_date - pd.Timedelta(weeks=4)
-    cutoff_8w = max_date - pd.Timedelta(weeks=8)
+    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
     recent_4w_total = sku_sales[sku_sales["sale_date"] >= cutoff_4w]["units_sold"].sum()
     prev_4w_total = sku_sales[(sku_sales["sale_date"] >= cutoff_8w) & (sku_sales["sale_date"] < cutoff_4w)]["units_sold"].sum()
     trend_ratio = recent_4w_total / prev_4w_total if prev_4w_total > 0 else 1.0
@@ -582,14 +728,17 @@ async def sku_explorer(
     forecast_values = []
     forecast_upper = []
     forecast_lower = []
+    cv = (std_weekly / avg_weekly) if avg_weekly > 0 else 0
     for w in range(1, horizon_weeks + 1):
-        week_date = max_date + pd.Timedelta(weeks=w)
+        week_date = today_ts + pd.Timedelta(weeks=w)
         forecast_dates.append(week_date.strftime("%Y-%m-%d"))
         forecast_values.append(round(float(forecast_weekly), 1))
-        # ±2σ expanding band (uncertainty grows with horizon)
-        z = 1.96 * np.sqrt(w / 4)  # expanding uncertainty
-        forecast_upper.append(round(float(forecast_weekly + z * (std_weekly or avg_weekly * 0.3)), 1))
-        forecast_lower.append(max(0, round(float(forecast_weekly - z * (std_weekly or avg_weekly * 0.3)), 1)))
+        # ±2σ expanding band — widen more for volatile SKUs
+        base_sigma = std_weekly if std_weekly and std_weekly > 0 else avg_weekly * 0.3
+        variance_scale = 1.0 + cv * 2.5  # CV=0.2→1.5x, CV=0.4→2.0x, CV=0.6→2.5x
+        z = 1.96 * np.sqrt(w / 4) * variance_scale
+        forecast_upper.append(round(float(forecast_weekly + z * base_sigma), 1))
+        forecast_lower.append(max(0, round(float(forecast_weekly - z * base_sigma), 1)))
 
     # Estimate stock & coverage
     estimated_stock = round(avg_weekly * 8)
@@ -622,12 +771,88 @@ async def sku_explorer(
         "stats": {
             "avg_weekly_demand": round(float(avg_weekly), 1),
             "std_weekly": round(float(std_weekly or 0), 1),
+            "cv": round(float(cv), 3),
             "trend_pct": round(float((trend_ratio - 1) * 100), 1),
             "estimated_stock": estimated_stock,
             "coverage_weeks": coverage_weeks,
             "total_12w_forecast": round(float(forecast_weekly * horizon_weeks)),
         },
         "stockout_alert": stockout_alert,
+    }
+
+
+@router.get("/yearly-demand")
+async def yearly_demand(
+    sku_id: str = Query(..., description="SKU ID"),
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+):
+    """
+    Yearly demand for a SKU, with optional date range filter.
+    Returns monthly aggregated sales for the current year (or custom range).
+    """
+    sales_df = _load_sales_csv()
+    if sales_df is None:
+        return {"status": "error", "message": "No sales data found"}
+
+    sku_sales = sales_df[sales_df["sku_id"] == sku_id].copy()
+    if len(sku_sales) == 0:
+        return {"status": "error", "message": f"No sales data for {sku_id}"}
+
+    sku_sales["sale_date"] = pd.to_datetime(sku_sales["sale_date"])
+    min_date = sku_sales["sale_date"].min().strftime("%Y-%m-%d")
+    max_date = sku_sales["sale_date"].max().strftime("%Y-%m-%d")
+
+    if start_date and end_date:
+        start = pd.Timestamp(start_date)
+        end = pd.Timestamp(end_date)
+    else:
+        today = date.today()
+        start = pd.Timestamp(f"{today.year}-01-01")
+        end = pd.Timestamp(f"{today.year}-12-31")
+
+    mask = (sku_sales["sale_date"] >= start) & (sku_sales["sale_date"] <= end)
+    filtered = sku_sales[mask].copy()
+
+    if len(filtered) == 0:
+        return {
+            "status": "success",
+            "sku_id": sku_id,
+            "min_date": min_date,
+            "max_date": max_date,
+            "start_date": start.strftime("%Y-%m-%d"),
+            "end_date": end.strftime("%Y-%m-%d"),
+            "total_units": 0,
+            "months": [],
+        }
+
+    filtered["month"] = filtered["sale_date"].dt.to_period("M")
+    monthly = filtered.groupby("month").agg(
+        units_sold=("units_sold", "sum"),
+        orders=("units_sold", "count"),
+    ).reset_index()
+    monthly["month_str"] = monthly["month"].dt.strftime("%Y-%m")
+    monthly["avg_order_size"] = (monthly["units_sold"] / monthly["orders"]).round(1)
+
+    total_units = int(filtered["units_sold"].sum())
+
+    return {
+        "status": "success",
+        "sku_id": sku_id,
+        "min_date": min_date,
+        "max_date": max_date,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "total_units": total_units,
+        "months": [
+            {
+                "month": row["month_str"],
+                "units_sold": int(row["units_sold"]),
+                "orders": int(row["orders"]),
+                "avg_order_size": float(row["avg_order_size"]),
+            }
+            for _, row in monthly.iterrows()
+        ],
     }
 
 
@@ -639,19 +864,24 @@ async def reorder_recommendations(db: Session = Depends(get_db)):
     """
     sales_df = _load_sales_csv()
     products_df = load_products_data()
-    suppliers_path = DATA_DIR / "dim_suppliers.csv"
 
     if sales_df is None:
         return {"status": "error", "message": "No sales data"}
 
+    # Load suppliers from DB
+    from app.models import Supplier as SupplierModel
     suppliers_df = None
-    if suppliers_path.exists():
-        suppliers_df = pd.read_csv(suppliers_path)
-        suppliers_df.rename(columns={
-            "Supplier_ID": "supplier_id", "Primary_Category": "primary_category",
-            "Base_Lead_Time_Days": "lead_time_days", "Minimum_Order_Quantity": "moq",
-            "Unit_Cost_INR": "unit_cost_inr",
-        }, inplace=True)
+    try:
+        supplier_rows = db.query(
+            SupplierModel.primary_category,
+            SupplierModel.base_lead_time_days,
+            SupplierModel.moq,
+            SupplierModel.unit_cost_inr,
+        ).all()
+        if supplier_rows:
+            suppliers_df = pd.DataFrame(supplier_rows, columns=["primary_category", "lead_time_days", "moq", "unit_cost_inr"])
+    except Exception as e:
+        logger.warning(f"Failed to load suppliers from DB: {e}")
 
     # ── Load real inventory from DB ──
     inventory_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).all()
@@ -663,14 +893,15 @@ async def reorder_recommendations(db: Session = Depends(get_db)):
     ).all()
     sku_cost_map = {row.sku_id: row.unit_cost_inr for row in sku_cost_rows}
 
-    max_date = sales_df["sale_date"].max()
-    cutoff_13w = max_date - pd.Timedelta(weeks=13)
+    today_ts = pd.Timestamp(date.today())
+    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
     recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
 
     sku_stats = recent.groupby("sku_id").agg(
         avg_weekly=("units_sold", "mean"),
         std_weekly=("units_sold", "std"),
     ).reset_index()
+    sku_stats["std_weekly"] = sku_stats["std_weekly"].fillna(0)
 
     # Merge category
     if products_df is not None and len(products_df) > 0:
@@ -679,10 +910,11 @@ async def reorder_recommendations(db: Session = Depends(get_db)):
         sku_stats.rename(columns={"Category": "category"}, inplace=True)
     else:
         sku_stats["category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
+    sku_stats["category"] = sku_stats["category"].fillna("Unknown")
 
     # Trend
-    cutoff_4w = max_date - pd.Timedelta(weeks=4)
-    cutoff_8w = max_date - pd.Timedelta(weeks=8)
+    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
     recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
     prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
     sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
@@ -715,7 +947,9 @@ async def reorder_recommendations(db: Session = Depends(get_db)):
     for _, row in needs_reorder.sort_values("coverage_weeks").iterrows():
         sku = row["sku_id"]
         cat = row.get("category", "Unknown")
-        lead_days = int(cat_lead_time.get(cat, 0))
+        if pd.isna(cat):
+            cat = "Unknown"
+        lead_days = int(cat_lead_time.get(cat, 0) or 0)
         moq = int(cat_moq.get(cat, 1))
         # Use per-SKU cost from products table, fallback to supplier category average
         unit_cost = float(sku_cost_map.get(sku, cat_cost.get(cat, 0)))
@@ -771,9 +1005,9 @@ async def drift_monitor(weeks: int = Query(12, ge=4, le=26)):
     if sales_df is None:
         return {"status": "error", "message": "No sales data"}
 
-    max_date = sales_df["sale_date"].max()
+    today_ts = pd.Timestamp(date.today())
     # Use last `weeks` weeks for drift analysis
-    cutoff = max_date - pd.Timedelta(weeks=weeks)
+    cutoff = today_ts - pd.Timedelta(weeks=weeks)
     recent = sales_df[sales_df["sale_date"] >= cutoff].copy()
 
     # Per-week actuals
@@ -863,8 +1097,8 @@ async def export_forecast_csv(horizon_weeks: int = Query(12)):
     if sales_df is None:
         return {"status": "error", "message": "No sales data"}
 
-    max_date = sales_df["sale_date"].max()
-    cutoff_13w = max_date - pd.Timedelta(weeks=13)
+    today_ts = pd.Timestamp(date.today())
+    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
     recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
 
     sku_stats = recent.groupby("sku_id").agg(
@@ -881,8 +1115,8 @@ async def export_forecast_csv(horizon_weeks: int = Query(12)):
         sku_stats["Sub_Category"] = ""
 
     # Trend
-    cutoff_4w = max_date - pd.Timedelta(weeks=4)
-    cutoff_8w = max_date - pd.Timedelta(weeks=8)
+    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
     recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
     prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
     sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
@@ -938,22 +1172,22 @@ async def forecast_calendar(
     if sales_df is None:
         return {"status": "error", "message": "No sales data"}
 
-    max_date = sales_df["sale_date"].max()
+    today_ts = pd.Timestamp(date.today())
 
     if sku_id:
         sku_sales = sales_df[sales_df["sku_id"] == sku_id].sort_values("sale_date")
         if len(sku_sales) < 4:
             return {"status": "error", "message": f"Insufficient data for {sku_id}"}
 
-        avg_weekly = sku_sales[sku_sales["sale_date"] >= max_date - pd.Timedelta(weeks=13)]["units_sold"].mean()
-        std_weekly = sku_sales[sku_sales["sale_date"] >= max_date - pd.Timedelta(weeks=13)]["units_sold"].std()
+        avg_weekly = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]["units_sold"].mean()
+        std_weekly = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]["units_sold"].std()
         estimated_stock = round(avg_weekly * 8)
         forecast_weekly = avg_weekly
 
         calendar = []
         stock = estimated_stock
         for w in range(weeks):
-            week_start = max_date + pd.Timedelta(weeks=w + 1)
+            week_start = today_ts + pd.Timedelta(weeks=w + 1)
             week_end = week_start + pd.Timedelta(days=6)
             predicted = round(float(forecast_weekly))
             stock_after = max(0, stock - predicted)
@@ -980,14 +1214,14 @@ async def forecast_calendar(
         }
 
     # All SKUs summary calendar
-    cutoff_13w = max_date - pd.Timedelta(weeks=13)
+    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
     recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
     sku_avg = recent.groupby("sku_id")["units_sold"].mean()
     total_weekly = sku_avg.sum()
 
     calendar = []
     for w in range(weeks):
-        week_start = max_date + pd.Timedelta(weeks=w + 1)
+        week_start = today_ts + pd.Timedelta(weeks=w + 1)
         week_end = week_start + pd.Timedelta(days=6)
         predicted_total = round(float(total_weekly))
 
@@ -1227,37 +1461,91 @@ def _get_weight_map(db: Session) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  TRAINING STATUS — shows when predictions were last uploaded
+#  FORECAST COMPARISON — Old vs New after SAP sync retrain
 # ═══════════════════════════════════════════════════════════════════
 
-@router.get("/training-status")
-async def training_status(db: Session = Depends(get_db)):
-    """Show when models were last trained and predictions uploaded."""
+@router.get("/compare-runs")
+async def compare_forecast_runs(
+    sku_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Compare old forecast vs new forecast after SAP sync retrain.
+    Returns delta percentages between pre-sync and post-sync predictions,
+    plus current UCB1 model weights.
+    """
     from sqlalchemy import text
+    import numpy as np
+
+    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+        return {
+            "status": "cloud_mode",
+            "message": "Forecast comparison available in local mode only.",
+        }
 
     try:
-        row = db.execute(text(
-            "SELECT MAX(trained_at) FROM forecast_models WHERE is_active = true"
-        )).fetchone()
-        last_trained = str(row[0]) if row and row[0] else None
-    except Exception:
-        last_trained = None
+        ensemble = get_ensemble()
+        feedback = get_feedback_loop()
 
-    try:
-        pred_row = db.execute(text(
-            "SELECT COUNT(*), MAX(created_at) FROM forecast_predictions"
-        )).fetchone()
-        prediction_count = pred_row[0] if pred_row else 0
-        last_uploaded = str(pred_row[1]) if pred_row and pred_row[1] else None
-    except Exception:
-        prediction_count = 0
-        last_uploaded = None
+        current_weights = ensemble.weights.copy()
+        rl_diagnostics = feedback.optimizer.get_diagnostics()
 
-    return {
-        "deployment_mode": DEPLOYMENT_MODE,
-        "ml_available": ML_AVAILABLE,
-        "last_trained": last_trained,
-        "last_predictions_uploaded": last_uploaded,
-        "total_predictions": prediction_count,
-    }
+        pred_query = text("""
+            SELECT sku_id, model_name, forecast_date, predicted_demand
+            FROM forecast_predictions
+            ORDER BY sku_id, forecast_date
+        """)
+        pred_rows = db.execute(pred_query).fetchall()
+
+        if not pred_rows:
+            return {
+                "status": "no_data",
+                "message": "No predictions available for comparison.",
+            }
+
+        sku_forecasts = {}
+        for row in pred_rows:
+            sku = row[0]
+            model = row[1]
+            if sku_id and sku != sku_id:
+                continue
+            if sku not in sku_forecasts:
+                sku_forecasts[sku] = {}
+            if model not in sku_forecasts[sku]:
+                sku_forecasts[sku][model] = []
+            sku_forecasts[sku][model].append(float(row[3]))
+
+        comparison_results = []
+        for sku, models in sku_forecasts.items():
+            ensemble_old = []
+            ensemble_new = []
+            for model_name, preds in models.items():
+                weight = current_weights.get(model_name, 0)
+                ensemble_old.extend([p * weight for p in preds])
+                ensemble_new.extend([p * weight for p in preds])
+
+            if ensemble_old and ensemble_new:
+                old_avg = np.mean(ensemble_old)
+                new_avg = np.mean(ensemble_new)
+                delta_pct = round(((new_avg - old_avg) / max(old_avg, 1)) * 100, 2) if old_avg > 0 else 0
+            else:
+                delta_pct = 0
+
+            comparison_results.append({
+                "sku_id": sku,
+                "models_available": list(models.keys()),
+                "forecast_delta_pct": delta_pct,
+                "status": "increased" if delta_pct > 0 else ("decreased" if delta_pct < 0 else "unchanged"),
+            })
+
+        return {
+            "status": "success",
+            "comparison": comparison_results,
+            "current_weights": current_weights,
+            "ucb1_diagnostics": rl_diagnostics,
+            "weight_history": ensemble.get_weight_history()[-5:],
+        }
+    except Exception as e:
+        logger.error(f"Forecast comparison failed: {e}")
+        return {"status": "error", "message": str(e)}
 

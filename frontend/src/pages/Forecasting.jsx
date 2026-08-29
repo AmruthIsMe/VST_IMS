@@ -1,24 +1,26 @@
-import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useMemo } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import {
-  getSkuExplorer, getForecastProducts, getReorderRecommendations,
+  getSkuExplorer, getForecastProducts, getReorderRecommendations, getYearlyDemand,
 } from '../services/api';
 import Header from '../components/Header';
 import {
   Line, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid,
-  ComposedChart,
+  ComposedChart, BarChart, Bar,
 } from 'recharts';
 import {
   TrendingUp, Target, RefreshCw, Clock,
-  Search, ShoppingCart, AlertTriangle, DollarSign
+  Search, ShoppingCart, AlertTriangle, DollarSign, Calendar, Activity,
 } from 'lucide-react';
+import ModelDrilldown from '../components/ModelDrilldown';
 
 const TABS = [
   { id: 'sku-explorer', label: 'SKU Explorer', icon: Search },
   { id: 'reorder', label: 'Reorder Panel', icon: ShoppingCart },
+  { id: 'model-drilldown', label: 'Performance Drill-down', icon: Activity },
 ];
 
-export default function Forecasting() {
+export default function Forecasting({ onMenuToggle }) {
   const [activeTab, setActiveTab] = useState('sku-explorer');
   const [skuSearch, setSkuSearch] = useState('');
   const [selectedSku, setSelectedSku] = useState('');
@@ -26,6 +28,9 @@ export default function Forecasting() {
   const [skuSubCategory, setSkuSubCategory] = useState('');
   const [reorderPage, setReorderPage] = useState(1);
   const REORDER_PAGE_SIZE = 25;
+  const currentYear = new Date().getFullYear();
+  const [dateFrom, setDateFrom] = useState(`${currentYear}-01-01`);
+  const [dateTo, setDateTo] = useState(`${currentYear}-12-31`);
   // ── Queries ──
   // ── SKU Explorer Queries ──
   const { data: productsData, isLoading: productsLoading } = useQuery({
@@ -36,30 +41,53 @@ export default function Forecasting() {
       search: skuSearch || undefined,
     }).then(r => r.data),
     enabled: activeTab === 'sku-explorer',
+    placeholderData: keepPreviousData,
   });
 
   const { data: skuData, isLoading: skuLoading } = useQuery({
     queryKey: ['sku-explorer', selectedSku],
     queryFn: () => getSkuExplorer({ sku_id: selectedSku, horizon_weeks: 12 }).then(r => r.data),
+    placeholderData: (previousData, currentData) => {
+      // When switching SKUs, keep the previous SKU's data during the transition
+      if (!currentData) return previousData;
+      return currentData;
+    },
     enabled: activeTab === 'sku-explorer' && !!selectedSku,
+    placeholderData: keepPreviousData,
   });
+
+  const { data: yearlyData, isLoading: yearlyLoading } = useQuery({
+    queryKey: ['yearly-demand', selectedSku, dateFrom, dateTo],
+    queryFn: () => getYearlyDemand({ sku_id: selectedSku, start_date: dateFrom, end_date: dateTo }).then(r => r.data),
+    enabled: activeTab === 'sku-explorer' && !!selectedSku,
+    placeholderData: keepPreviousData,
+  });
+
+  // Clamp date range to available data when SKU changes
+  useEffect(() => {
+    if (yearlyData?.min_date && yearlyData?.max_date) {
+      setDateFrom((prev) => prev < yearlyData.min_date ? yearlyData.min_date : prev);
+      setDateTo((prev) => prev > yearlyData.max_date ? yearlyData.max_date : prev);
+    }
+  }, [yearlyData?.min_date, yearlyData?.max_date, selectedSku]);
 
   // Auto-select first SKU when products load
   useEffect(() => {
     if (activeTab === 'sku-explorer' && productsData?.products?.length > 0 && !selectedSku) {
       setSelectedSku(productsData.products[0].sku_id);
     }
-  }, [activeTab, productsData, selectedSku]);
+  }, [activeTab, productsData]);
 
   const { data: reorderData, isLoading: reorderLoading } = useQuery({
     queryKey: ['reorder-recs'],
     queryFn: () => getReorderRecommendations().then(r => r.data),
     enabled: activeTab === 'reorder',
+    placeholderData: keepPreviousData,
   });
 
   return (
     <div>
-      <Header locationText="Demand Forecasting Engine — Multi-Model Ensemble" />
+      <Header locationText="Demand Forecasting Engine — Multi-Model Ensemble" onMenuToggle={onMenuToggle} />
 
       <div style={{ padding: '12px 32px 24px 32px' }}>
         {/* Page Banner + Tabs inline */}
@@ -285,7 +313,12 @@ export default function Forecasting() {
                     <div style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid #eaecf0', backgroundColor: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                       <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 700, color: '#1a1d1a', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#2563eb', display: 'inline-block' }} />
-                        12-Week Forecast with Confidence Band (±2σ)
+                        12-Week Forecast with Confidence Band
+                        {skuData.stats?.cv != null && (
+                          <span style={{ fontSize: 10, fontWeight: 500, color: '#667085', marginLeft: 4 }}>
+                            (CV: {(skuData.stats.cv * 100).toFixed(0)}% — {skuData.stats.cv > 0.4 ? 'volatile' : skuData.stats.cv > 0.2 ? 'moderate' : 'stable'})
+                          </span>
+                        )}
                       </div>
                       <ResponsiveContainer width="100%" height={260}>
                         <ComposedChart margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
@@ -302,7 +335,9 @@ export default function Forecasting() {
                           <Area
                             data={skuData.forecast?.dates?.map((d, i) => ({ date: d, upper: skuData.forecast.upper_bound[i], lower: skuData.forecast.lower_bound[i] })) || []}
                             type="monotone" dataKey="upper" name="Upper Bound"
-                            stroke="none" fill="#2563eb" fillOpacity={0.1} legendType="none"
+                            stroke="none" fill="#2563eb"
+                            fillOpacity={Math.min(0.30, 0.05 + (skuData.stats?.cv || 0) * 0.4)}
+                            legendType="none"
                           />
                           <Area
                             data={skuData.forecast?.dates?.map((d, i) => ({ date: d, upper: skuData.forecast.upper_bound[i], lower: skuData.forecast.lower_bound[i] })) || []}
@@ -317,12 +352,71 @@ export default function Forecasting() {
                         </ComposedChart>
                       </ResponsiveContainer>
                     </div>
+
+                    {/* Yearly Demand Chart */}
+                    <div style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid #eaecf0', backgroundColor: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', marginTop: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1d1a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Calendar size={14} color="#175cd3" />
+                          Demand History
+                          {yearlyData?.total_units != null && (
+                            <span style={{ fontSize: 11, fontWeight: 500, color: '#667085' }}>
+                              — {yearlyData.total_units.toLocaleString()} units total
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            type="date"
+                            value={dateFrom}
+                            min={yearlyData?.min_date || ''}
+                            max={dateTo || yearlyData?.max_date || ''}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                            style={{ fontSize: 11, padding: '4px 8px', border: '1px solid #eaecf0', borderRadius: 6, color: '#344054', backgroundColor: '#fff' }}
+                          />
+                          <span style={{ fontSize: 11, color: '#667085' }}>to</span>
+                          <input
+                            type="date"
+                            value={dateTo}
+                            min={dateFrom || yearlyData?.min_date || ''}
+                            max={yearlyData?.max_date || ''}
+                            onChange={(e) => setDateTo(e.target.value)}
+                            style={{ fontSize: 11, padding: '4px 8px', border: '1px solid #eaecf0', borderRadius: 6, color: '#344054', backgroundColor: '#fff' }}
+                          />
+                        </div>
+                      </div>
+                      {yearlyLoading ? (
+                        <div style={{ padding: 30, textAlign: 'center', color: '#667085', fontSize: 12 }}>
+                          <RefreshCw size={16} className="spin" style={{ marginRight: 6 }} />Loading demand data...
+                        </div>
+                      ) : yearlyData?.months?.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={200}>
+                          <BarChart data={yearlyData.months} margin={{ top: 8, right: 10, left: -15, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                            <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#667085' }} />
+                            <YAxis tick={{ fontSize: 10, fill: '#667085' }} />
+                            <Tooltip
+                              contentStyle={{ borderRadius: 10, fontSize: 12 }}
+                              formatter={(value, name) => [value.toLocaleString(), name === 'units_sold' ? 'Units Sold' : name]}
+                            />
+                            <Bar dataKey="units_sold" name="Units Sold" fill="#2563eb" radius={[4, 4, 0, 0]} barSize={28} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div style={{ padding: 30, textAlign: 'center', color: '#667085', fontSize: 12 }}>
+                          No demand data for selected date range
+                        </div>
+                      )}
+                    </div>
                   </>
                 ) : null}
               </div>
             </div>
           </div>
         )}
+
+        {/* ═══════ TAB: PERFORMANCE DRILL-DOWN ═══════ */}
+        {activeTab === 'model-drilldown' && <ModelDrilldown />}
 
         {/* ═══════ TAB 6: REORDER RECOMMENDATIONS ═══════ */}
         {activeTab === 'reorder' && (

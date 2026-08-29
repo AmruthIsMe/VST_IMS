@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from app.config import get_settings
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+DATA_DIR = Path(get_settings().DATA_DIR)
 
 from app.forecasting.constants import SKU_CATEGORY_PREFIX
 

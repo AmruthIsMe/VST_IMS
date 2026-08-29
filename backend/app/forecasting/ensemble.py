@@ -12,6 +12,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
+from app.forecasting import training_progress as progress
+
 from app.forecasting.models import (
     get_all_models,
     BaseForecaster,
@@ -117,6 +119,7 @@ class AdaptiveEnsemble:
 
         # --- Train ML models (XGBoost, LightGBM) on full feature set ---
         for model_name in self.ML_MODELS:
+            progress.begin_model(model_name)
             try:
                 model = get_all_models()[model_name]
                 train_result = model.train(X_train_df, pd.Series(y_train))
@@ -132,10 +135,12 @@ class AdaptiveEnsemble:
                     "train_result": train_result,
                     "test_metrics": metrics,
                 }
+                progress.complete_model(model_name, metrics={"mape": metrics["mape"], "mae": metrics["mae"], "rmse": metrics["rmse"]})
                 logger.info(f"{model_name} trained — MAPE: {metrics['mape']}%")
             except Exception as e:
                 logger.error(f"{model_name} training failed: {e}")
                 results[model_name] = {"status": "failed", "error": str(e)}
+                progress.complete_model(model_name, error=str(e))
 
         # --- Train time-series models on first SKU (or aggregated) ---
         representative_sku = sku_id or (sku_ids[0] if sku_ids else None)
@@ -149,6 +154,7 @@ class AdaptiveEnsemble:
                 ts_actual = ts_values.iloc[-test_weeks:].values if len(ts_values) > test_weeks else ts_values.values
 
                 for model_name in self.TS_MODELS:
+                    progress.begin_model(model_name)
                     try:
                         model = get_all_models()[model_name]
                         train_result = model.train(
@@ -181,15 +187,16 @@ class AdaptiveEnsemble:
                                 "train_result": train_result,
                                 "test_metrics": metrics,
                             }
+                            progress.complete_model(model_name, metrics={"mape": metrics.get("mape", 0), "mae": metrics.get("mae", 0), "rmse": metrics.get("rmse", 0)})
                             logger.info(f"{model_name} trained — MAPE: {metrics.get('mape', 'N/A')}%")
                         else:
-                            results[model_name] = {
-                                "status": "failed",
-                                "error": train_result.get("error", "Training returned untrained model"),
-                            }
+                            err = train_result.get("error", "Training returned untrained model")
+                            results[model_name] = {"status": "failed", "error": err}
+                            progress.complete_model(model_name, error=err)
                     except Exception as e:
                         logger.error(f"{model_name} training failed: {e}")
                         results[model_name] = {"status": "failed", "error": str(e)}
+                        progress.complete_model(model_name, error=str(e))
             except Exception as e:
                 logger.error(f"Time-series data prep failed: {e}")
                 for model_name in self.TS_MODELS:
@@ -210,6 +217,10 @@ class AdaptiveEnsemble:
                 "models_trained": 0,
                 "ensemble_mape": None,
                 "weights": self.weights.copy(),
+                "per_model": {
+                    name: {"status": r.get("status"), "error": r.get("error")}
+                    for name, r in results.items()
+                },
                 "error": "All models failed",
             })
             self._save_history()
@@ -238,6 +249,20 @@ class AdaptiveEnsemble:
         elapsed = (datetime.now() - start_time).total_seconds()
 
         # Save training record
+        def _per_model_snapshot(res: dict) -> dict:
+            snap = {}
+            for model_name, r in res.items():
+                tm = r.get("test_metrics", {}) or {}
+                snap[model_name] = {
+                    "status": r.get("status"),
+                    "mae": tm.get("mae"),
+                    "mape": tm.get("mape"),
+                    "rmse": tm.get("rmse"),
+                    "smape": tm.get("smape"),
+                    "bias": tm.get("bias"),
+                }
+            return snap
+
         training_record = {
             "date": datetime.now().isoformat(),
             "sku_id": sku_id,
@@ -246,6 +271,14 @@ class AdaptiveEnsemble:
             "models_trained": models_trained_count,
             "ensemble_mape": ensemble_metrics.get("mape"),
             "weights": self.weights.copy(),
+            "per_model": _per_model_snapshot(results),
+            "dataset": {
+                "train_rows": dataset["train_rows"],
+                "test_rows": dataset["test_rows"],
+                "split_date": str(dataset.get("split_date", "")),
+                "n_features": len(feature_cols),
+                "sku_count": len(sku_ids),
+            },
         }
         self.training_history.append(training_record)
         self.is_trained = True

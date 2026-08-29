@@ -7,7 +7,7 @@ import {
   Database, BarChart3, FlaskConical, ChevronDown, ChevronRight, Download,
 } from 'lucide-react';
 
-export default function Genie() {
+export default function Genie({ onMenuToggle }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -383,7 +383,7 @@ export default function Genie() {
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="genie-page">
-      <Header locationText="Genie — AI-Powered Inventory Intelligence" />
+      <Header locationText="Genie — AI-Powered Inventory Intelligence" onMenuToggle={onMenuToggle} />
 
       <div className="genie-layout">
         <div className="genie-chat-container">

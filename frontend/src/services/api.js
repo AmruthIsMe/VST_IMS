@@ -5,6 +5,16 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Attach token from localStorage if present
+const savedToken = typeof window !== 'undefined' ? localStorage.getItem('vst_token') : null;
+if (savedToken) {
+  api.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+}
+
+// ─── Auth ───────────────────────────────────────────────────────────
+export const loginApi = (username, password) => api.post('/auth/login', { username, password });
+export const getMe = () => api.get('/auth/me');
+
 // Dashboard
 export const getKPIs = () => api.get('/dashboard/kpis');
 export const getDemandTrend = (params) => api.get('/dashboard/charts/demand-trend', { params });
@@ -43,10 +53,12 @@ export const updateUser = (id, data) => api.put(`/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/users/${id}`);
 
 // SAP
-export const getSapSyncStatus = () => api.get('/sap/sync-status');
+export const getSapSyncStatus = () => api.get('/sap/sync/status');
 export const testSapConnection = () => api.post('/sap/test-connection');
-export const triggerSapSync = (syncType) => api.post('/sap/sync', { sync_type: syncType });
-export const updateSapConfig = (data) => api.post('/sap/config', null, { params: data });
+export const checkSapMockStatus = () => api.get('/sap/mock-status');
+export const syncSalesOnly = () => api.post('/sap/sync/sales');
+export const syncAll = () =>
+  api.post('/sap/sync-and-retrain?retrain=true', null, { timeout: 900000 });
 
 // ─── Demand Forecasting ─────────────────────────────────────────────
 export const trainForecastModels = (params) => api.post('/forecast/train', null, { params });
@@ -58,11 +70,15 @@ export const retrainForecastModels = (params) => api.post('/forecast/retrain', n
 export const listForecastModels = () => api.get('/forecast/models');
 export const getForecastSummary = () => api.get('/forecast/summary');
 export const getSkuExplorer = (params) => api.get('/forecast/sku-explorer', { params });
+export const getYearlyDemand = (params) => api.get('/forecast/yearly-demand', { params });
 export const getForecastProducts = (params) => api.get('/forecast/products', { params });
 export const getReorderRecommendations = () => api.get('/forecast/reorder-recommendations');
 export const getDriftMonitor = (params) => api.get('/forecast/drift-monitor', { params });
 export const exportForecastCsv = (params) => api.get('/forecast/export-csv', { params, responseType: 'blob' });
 export const getForecastCalendar = (params) => api.get('/forecast/calendar', { params });
+export const compareForecastRuns = (params) => api.get('/forecast/compare-runs', { params });
+export const getTrainingStatus = () => api.get('/forecast/training-status');
+export const getTrainingHistory = (params) => api.get('/forecast/training-history', { params });
 
 // ─── Genie Chatbot ──────────────────────────────────────────────────
 export const sendGenieMessage = (message, conversationId) =>

@@ -1,7 +1,11 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
+import Header from './components/Header';
+import ProtectedRoute from './components/ProtectedRoute';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Orders from './pages/Orders';
@@ -17,29 +21,50 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },
 });
 
+function AppContent() {
+  const { isAuthenticated } = useAuth();
+  const { mobileMenuOpen, closeMobileMenu, toggleMobileMenu } = useApp();
+
+  if (!isAuthenticated) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
+
+  return (
+    <div className="app-layout">
+      <Sidebar isMobileOpen={mobileMenuOpen} onMobileClose={closeMobileMenu} />
+      <main className="main-content">
+        <Routes>
+          <Route path="/" element={<Dashboard onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/products" element={<Products onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/orders" element={<Orders onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/suppliers" element={<Suppliers onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/forecasting" element={<Forecasting onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/genie" element={<Genie onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/users" element={<Users onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/sap-sync" element={<SapSync onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/settings" element={<Settings onMenuToggle={toggleMobileMenu} />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppProvider>
-        <BrowserRouter>
-          <div className="app-layout">
-            <Sidebar />
-            <main className="main-content">
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/products" element={<Products />} />
-                <Route path="/orders" element={<Orders />} />
-                <Route path="/suppliers" element={<Suppliers />} />
-                <Route path="/forecasting" element={<Forecasting />} />
-                <Route path="/genie" element={<Genie />} />
-                <Route path="/users" element={<Users />} />
-                <Route path="/sap-sync" element={<SapSync />} />
-                <Route path="/settings" element={<Settings />} />
-              </Routes>
-            </main>
-          </div>
-        </BrowserRouter>
-      </AppProvider>
+      <AuthProvider>
+        <AppProvider>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </AppProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

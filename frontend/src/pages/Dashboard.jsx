@@ -40,7 +40,7 @@ function renderPieLabel({ cx, cy, midAngle, outerRadius, percent, index }) {
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onMenuToggle }) {
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('All');
   const [riskFilter, setRiskFilter] = useState('All');
@@ -97,7 +97,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <Header locationText="Malur Manufacturing Facility | Bengaluru, Karnataka" />
+      <Header locationText="Malur Manufacturing Facility | Bengaluru, Karnataka" onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
         {/* KPI Cards Row */}

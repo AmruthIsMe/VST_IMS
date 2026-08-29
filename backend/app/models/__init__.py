@@ -24,6 +24,7 @@ class Product(Base):
     last_synced_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    unit_cost_inr = Column(Float)
 
     sales = relationship("Sale", back_populates="product")
     forecast = relationship("Forecast", back_populates="product")
@@ -107,6 +108,7 @@ class Sale(Base):
     units_sold = Column(Integer, nullable=False)
     fulfillment_region = Column(String(100))
     stockout_flag = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     product = relationship("Product", back_populates="sales")
 
@@ -158,6 +160,7 @@ class SapSyncLog(Base):
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=False)
     completed_at = Column(DateTime, nullable=True)
+    detail_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -172,6 +175,7 @@ class SapConfig(Base):
     password_encrypted = Column(String(500))
     language = Column(String(10), default="EN")
     is_active = Column(Boolean, default=False)
+    last_sync_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

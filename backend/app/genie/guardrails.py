@@ -45,16 +45,45 @@ ALLOWED_TOPICS = {
 
 # Topics Genie will explicitly refuse.
 BLOCKED_TOPICS = {
-    "politics", "religion", "personal", "salary", "hire", "fire",
-    "lawsuit", "legal advice", "competitor", "gossip", "joke", "poem",
-    "recipe", "weather forecast outside", "sports", "entertainment",
-    "stock market", "share price", "investment advice",
-    "write code for me", "programming help", "hack", "exploit", "bypass",
-    "ignore instructions", "ignore previous", "system prompt",
-    "act as", "pretend", "roleplay", "forget",
+    "personal", "salary", "hire", "fire",
+    "lawsuit", "legal advice", "competitor", "gossip",
+    "weather forecast outside",
 }
 
-# ─── Prompt Injection Patterns ───────────────────────────────────────
+# Specific off-topic asks that are refused even if an allowed keyword
+# co-occurs (e.g. "share price of VST" must NOT pass because of "vst").
+STRONG_BLOCKED_TOPICS = [
+    "politics", "religion", "share price", "stock market", "stock price",
+    "investment advice", "invest in", "crypto", "bitcoin",
+    "joke", "poem", "poetry", "recipe", "song", "story about",
+    "write code", "programming help", "hack", "exploit", "malware",
+    "roleplay", "lawsuit", "medical advice", "dating",
+]
+
+# ─── SQL Guardrails ──────────────────────────────────────────────────
+# Permitted statement verb - everything else is forbidden.
+SQL_FORBIDDEN_KEYWORDS = (
+    "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE",
+    "GRANT", "REVOKE", "MERGE", "REPLACE", "ATTACH", "DETACH",
+    "PRAGMA", "VACUUM", "REINDEX",
+)
+
+# Tables the SQL agent may touch. Anything else (users, sap_sync_log,
+# sqlite_master, genie_conversations, ...) is rejected even if the LLM
+# hallucinates it.
+ALLOWED_SQL_TABLES = frozenset({
+    "products", "suppliers", "sales", "external_factors",
+    "forecasts", "forecast_models", "forecast_predictions",
+    "orders", "order_items", "inventory",
+})
+
+# Secrets / internals that must never appear verbatim in an answer.
+OUTPUT_SECRET_PATTERNS = [
+    r"(?i)\bAIza[0-9A-Za-z_\-]{20,}",                 # Google API key shape
+    r"(?i)(api[_-]?key|secret[_-]?key|password)\s*[:=]\s*\S+",
+    r"(?i)sk-[A-Za-z0-9]{16,}",                        # generic LLM key shape
+]
+
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+)?previous\s+instructions",
     r"ignore\s+(all\s+)?above",
@@ -68,6 +97,10 @@ INJECTION_PATTERNS = [
     r"(?:do\s+not|don'?t)\s+follow\s+(your\s+)?rules",
     r"reveal\s+(your\s+)?(system|instructions|prompt)",
     r"what\s+(are|is)\s+your\s+(system\s+)?(prompt|instructions)",
+    r"print\s+(your\s+)?(system\s+)?(prompt|instructions|rules)",
+    r"repeat\s+(your\s+)?(system\s+)?(prompt|instructions)",
+    r"\bexec(x|ute)\b.*\bscript\b",
+    r"<\s*script\b",
 ]
 
 # ─── PII Patterns ────────────────────────────────────────────────────
@@ -77,14 +110,6 @@ PII_PATTERNS = {
     "aadhaar": r"\b\d{4}\s?\d{4}\s?\d{4}\b",
     "pan": r"\b[A-Z]{5}\d{4}[A-Z]\b",
 }
-
-# ─── SQL Guardrails ──────────────────────────────────────────────────
-# Permitted statement verb - everything else is forbidden.
-SQL_FORBIDDEN_KEYWORDS = (
-    "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE",
-    "GRANT", "REVOKE", "MERGE", "REPLACE", "ATTACH", "DETACH",
-    "PRAGMA", "VACUUM", "REINDEX",
-)
 
 
 class GenieGuardrails:
@@ -120,7 +145,40 @@ class GenieGuardrails:
                 "message": "Message too long. Please keep your question under 2000 characters.",
             }
 
+        # Strip control characters (terminal escape / paste attacks)
+        message = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", message)
+
+        # Sanitize early so shape checks see content, not SQL fragments
+        sanitized = self._sanitize_input(message)
         message_lower = message.lower().strip()
+
+        # Layer 0: hard off-topic phrases (no co-occurrence escape hatch)
+        for topic in STRONG_BLOCKED_TOPICS:
+            if topic in message_lower:
+                self.blocked_count += 1
+                return {
+                    "is_safe": False,
+                    "reason": "off_topic",
+                    "message": (
+                        f"I'm Genie, the VST inventory assistant. I can't help with "
+                        f"that, but I can answer inventory, forecast and reorder questions."
+                    ),
+                }
+
+        # Layer 0.5: content-free input (punctuation/SQL fragments/gibberish)
+        SMALLTALK = ("hello", "hi", "hey", "help", "thanks", "thank you",
+                     "thank", "bye", "goodbye", "what can you do")
+        alpha = re.sub(r"[^a-zA-Z]", "", sanitized)
+        if len(alpha) < 8 and not any(s in message_lower for s in SMALLTALK):
+            self.blocked_count += 1
+            return {
+                "is_safe": False,
+                "reason": "content_free",
+                "message": (
+                    "That doesn't look like a complete question. Try asking about "
+                    "stock levels, SKUs, suppliers, demand forecasts or reorder needs."
+                ),
+            }
 
         # Layer 1: Prompt injection
         for pattern in INJECTION_PATTERNS:
@@ -153,23 +211,26 @@ class GenieGuardrails:
         return {
             "is_safe": True,
             "reason": "passed",
-            "sanitized": self._sanitize_input(message),
+            "sanitized": sanitized,
         }
 
     # ── Output validation ──────────────────────────────────────────
     def validate_output(self, response: str) -> str:
-        """Redact any PII that might have leaked from data into the response."""
+        """Redact PII and any leaked secrets/credentials from the answer."""
         if not response:
             return response
         sanitized = response
         for pii_type, pattern in PII_PATTERNS.items():
             sanitized = re.sub(pattern, f"[{pii_type.upper()}_REDACTED]", sanitized)
+        for pattern in OUTPUT_SECRET_PATTERNS:
+            sanitized = re.sub(pattern, "[CREDENTIAL_REDACTED]", sanitized)
         return sanitized
 
     # ── SQL validation ──────────────────────────────────────────────
     def validate_sql(self, sql: str) -> tuple[bool, str]:
         """
-        Enforce that an LLM-generated string is a single READ-ONLY SELECT.
+        Enforce that an LLM-generated string is a single READ-ONLY SELECT
+        that only touches allow-listed tables.
 
         Returns (is_safe, reason).  reason is "" when safe.
         """
@@ -183,7 +244,7 @@ class GenieGuardrails:
             return False, "not_a_select_statement"
 
         # Statement-level semicolon (more than one statement)
-        if stripped.count(";") > 0:
+        if ";" in stripped:
             return False, "multiple_statements"
 
         # Forbidden keywords anywhere as standalone words
@@ -196,6 +257,24 @@ class GenieGuardrails:
         # Block comment-based injection tricks
         if "--" in stripped or "/*" in stripped:
             return False, "comment_sequence"
+
+        # Table allow-list: every FROM/JOIN target must be permitted.
+        # CTE names (WITH name AS ..., , name2 AS ...) are excluded from checks.
+        cte_names = {
+            m.group(1).lower()
+            for m in re.finditer(
+                r"(?:\bWITH|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s+as\s*\(",
+                stripped, re.IGNORECASE,
+            )
+        }
+        for m in re.finditer(
+            r"\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_]*)", stripped, re.IGNORECASE
+        ):
+            table = m.group(1).lower()
+            if table in cte_names:
+                continue
+            if table not in ALLOWED_SQL_TABLES:
+                return False, f"table_not_allowed:{table}"
 
         return True, ""
 
@@ -244,6 +323,17 @@ class GenieGuardrails:
         }
 
     # ── Helpers ─────────────────────────────────────────────────────
+    @staticmethod
+    def clamp_number(value, lo: float, hi: float, default: float) -> float:
+        """Clamp an LLM/user-supplied simulation parameter into a sane range."""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return default
+        if v != v:  # NaN
+            return default
+        return max(lo, min(hi, v))
+
     @staticmethod
     def _sanitize_input(message: str) -> str:
         """Strip the most common SQL-injection vectors while keeping NL punctuation."""

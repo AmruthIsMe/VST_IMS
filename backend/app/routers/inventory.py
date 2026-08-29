@@ -5,6 +5,7 @@ from uuid import UUID
 from app.database import get_db
 from app.models import Inventory
 from app.schemas import InventoryCreate, InventoryUpdate, InventoryResponse, PaginatedResponse
+from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
@@ -60,7 +61,7 @@ def get_inventory(inventory_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=InventoryResponse, status_code=201)
-def create_inventory(data: InventoryCreate, db: Session = Depends(get_db)):
+def create_inventory(data: InventoryCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     existing = db.query(Inventory).filter(Inventory.sku_id == data.sku_id).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Inventory record already exists for SKU {data.sku_id}")
@@ -72,7 +73,7 @@ def create_inventory(data: InventoryCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{inventory_id}", response_model=InventoryResponse)
-def update_inventory(inventory_id: UUID, data: InventoryUpdate, db: Session = Depends(get_db)):
+def update_inventory(inventory_id: UUID, data: InventoryUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     item = db.query(Inventory).filter(Inventory.id == inventory_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Inventory record not found")
@@ -84,7 +85,7 @@ def update_inventory(inventory_id: UUID, data: InventoryUpdate, db: Session = De
 
 
 @router.delete("/{inventory_id}")
-def delete_inventory(inventory_id: UUID, db: Session = Depends(get_db)):
+def delete_inventory(inventory_id: UUID, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     item = db.query(Inventory).filter(Inventory.id == inventory_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Inventory record not found")

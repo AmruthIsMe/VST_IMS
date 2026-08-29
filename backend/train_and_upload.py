@@ -35,6 +35,8 @@ if hasattr(sys.stderr, "reconfigure"):
 import pandas as pd
 import numpy as np
 
+from app.config import get_settings
+
 # --- Configuration ---
 DATA_DIR = BACKEND_DIR.parent / "data"
 MODELS_DIR = BACKEND_DIR / "trained_models"
@@ -64,128 +66,107 @@ def get_cloud_engine(db_url):
 def train_models():
     """Train all 6 ML models using the existing ensemble code."""
     print("\n" + "=" * 60)
-    print("  🏋️  PHASE 1: Training Models Locally")
+    print("  PHASE 1: Training Models Locally")
     print("=" * 60)
-    
+
     from app.forecasting.ensemble import get_ensemble
-    
+
     ensemble = get_ensemble()
     results = ensemble.train_all_models(test_weeks=12)
-    
-    models_trained = results.get("metadata", {}).get("models_trained", 0)
+
+    models_trained = sum(
+        1 for r in results.get("models", {}).values() if r.get("status") == "trained"
+    )
     elapsed = results.get("metadata", {}).get("elapsed_seconds", "?")
-    
-    print(f"\n   ✅ Trained {models_trained} models in {elapsed}s")
-    
-    # Show per-model metrics
-    for model_name, metrics in results.get("model_results", {}).items():
-        if isinstance(metrics, dict) and "mape" in metrics:
-            mape = metrics["mape"]
+
+    print(f"\n   Trained {models_trained} models in {elapsed}s")
+
+    for model_name, r in results.get("models", {}).items():
+        metrics = r.get("test_metrics", {}) if isinstance(r, dict) else {}
+        if metrics.get("mape") is not None:
             weight = ensemble.weights.get(model_name, 0)
-            print(f"   📊 {model_name:15s}  MAPE={mape:.1f}%  Weight={weight:.1%}")
-    
+            print(f"   {model_name:15s}  MAPE={metrics['mape']}%  Weight={weight:.1%}")
+
     return ensemble, results
 
 
-def generate_predictions(ensemble):
-    """Generate 12-week predictions for all 200 SKUs."""
+def generate_predictions(ensemble, db_url: str):
+    """Generate 12-week predictions for all SKUs directly from the source DB."""
     print("\n" + "=" * 60)
-    print("  🔮  PHASE 2: Generating Predictions for All SKUs")
+    print("  PHASE 2: Generating Predictions for All SKUs")
     print("=" * 60)
-    
-    from app.forecasting.data_pipeline import prepare_dataset, load_products_data
-    
-    products_df = load_products_data()
-    if products_df is None or len(products_df) == 0:
-        print("   ❌ No products data found!")
-        return []
-    
-    sku_ids = products_df["SKU_ID"].unique().tolist()
-    print(f"   📦 Found {len(sku_ids)} SKUs to forecast")
-    
-    # Load sales data for EWMA-based predictions
-    sales_path = DATA_DIR / "fact_sales.csv"
-    if not sales_path.exists():
-        print("   ❌ fact_sales.csv not found!")
-        return []
-    
-    sales_df = pd.read_csv(sales_path, parse_dates=["Date"])
-    sales_df.rename(columns={"Date": "sale_date", "SKU_ID": "sku_id", "Units_Sold": "units_sold"}, inplace=True)
-    max_date = sales_df["sale_date"].max()
-    
-    all_predictions = []
+
+    from sqlalchemy import create_engine
+    from sqlalchemy import text as sql_text
+    import uuid
+
     horizon_weeks = 12
     now = datetime.utcnow()
-    
-    for i, sku_id in enumerate(sku_ids):
-        sku_sales = sales_df[sales_df["sku_id"] == sku_id].sort_values("sale_date")
-        if len(sku_sales) < 4:
+    all_predictions = []
+    sku_count = 0
+
+    engine = create_engine(db_url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        rows = conn.execute(sql_text(
+            "SELECT sale_date, sku_id, units_sold FROM sales ORDER BY sku_id, sale_date"
+        )).fetchall()
+
+    sales_df = pd.DataFrame(rows, columns=["sale_date", "sku_id", "units_sold"])
+    sales_df["sale_date"] = pd.to_datetime(sales_df["sale_date"])
+    global_last = sales_df["sale_date"].max()
+    print(f"   Data through: {global_last.date()} | {sales_df['sku_id'].nunique()} SKUs")
+
+    for sku_id, grp in sales_df.groupby("sku_id"):
+        series = grp.sort_values("sale_date")["units_sold"].astype(float)
+        if len(series) < 4:
             continue
-        
-        # Compute EWMA-based forecast
-        cutoff_13w = max_date - pd.Timedelta(weeks=13)
-        recent = sku_sales[sku_sales["sale_date"] >= cutoff_13w]
-        avg_weekly = recent["units_sold"].mean()
-        std_weekly = recent["units_sold"].std()
-        
-        cutoff_4w = max_date - pd.Timedelta(weeks=4)
-        cutoff_8w = max_date - pd.Timedelta(weeks=8)
-        recent_4w = sku_sales[sku_sales["sale_date"] >= cutoff_4w]["units_sold"].sum()
-        prev_4w = sku_sales[(sku_sales["sale_date"] >= cutoff_8w) & (sku_sales["sale_date"] < cutoff_4w)]["units_sold"].sum()
-        trend_ratio = recent_4w / prev_4w if prev_4w > 0 else 1.0
-        forecast_weekly = avg_weekly * trend_ratio
-        
-        # Try ML model predictions if available
+        sku_count += 1
+        values = series.values
+        recent4 = values[-4:].mean()
+        prev4 = values[-8:-4].mean() if len(values) >= 8 else recent4
+        trend_ratio = float(np.clip(recent4 / prev4, 0.5, 2.0)) if prev4 > 0 else 1.0
+        forecast_weekly = float(recent4 * trend_ratio)
+        std_weekly = float(values[-13:].std() if len(values) >= 13 else values.std())
+
         model_predictions = {}
         for model_name in ["xgboost", "lightgbm", "arima", "sarima", "prophet", "holt_winters"]:
-            if model_name in ensemble.models and ensemble.models[model_name].is_trained:
+            model = ensemble.models.get(model_name)
+            if model and getattr(model, "is_trained", False) and model_name in ("arima", "sarima", "prophet", "holt_winters"):
                 try:
-                    if model_name in ensemble.ML_MODELS:
-                        # ML models need features
-                        try:
-                            dataset = prepare_dataset(sku_id=sku_id, test_weeks=0)
-                            test_df = dataset["train"].tail(horizon_weeks)
-                            feature_cols = dataset["feature_cols"]
-                            X = pd.DataFrame(test_df[feature_cols].values, columns=feature_cols)
-                            preds = ensemble.models[model_name].predict(X)
-                            model_predictions[model_name] = preds.tolist()
-                        except Exception:
-                            model_predictions[model_name] = [forecast_weekly] * horizon_weeks
-                    else:
-                        # Time series models
-                        preds = ensemble.models[model_name].predict(horizon=horizon_weeks)
-                        if len(preds) < horizon_weeks:
-                            preds = list(preds) + [preds[-1]] * (horizon_weeks - len(preds))
-                        model_predictions[model_name] = preds[:horizon_weeks]
+                    preds = np.asarray(model.predict(horizon=horizon_weeks), dtype=float)
+                    preds = list(preds) + [preds[-1]] * max(0, horizon_weeks - len(preds))
+                    model_predictions[model_name] = preds[:horizon_weeks]
                 except Exception:
                     model_predictions[model_name] = [forecast_weekly] * horizon_weeks
             else:
-                # Use EWMA as fallback for untrained models
                 model_predictions[model_name] = [forecast_weekly] * horizon_weeks
-        
-        # Generate prediction rows for each week
-        for w in range(horizon_weeks):
-            week_date = (max_date + pd.Timedelta(weeks=w + 1)).date()
-            z = 1.96 * np.sqrt((w + 1) / 4)
-            
-            for model_name, preds in model_predictions.items():
-                pred_val = float(preds[w]) if w < len(preds) else forecast_weekly
+
+        weights = ensemble.weights
+        w_total = sum(weights.get(m, 0) for m in model_predictions) or 1.0
+        ens = [
+            sum(model_predictions[m][w] * weights.get(m, 0) for m in model_predictions) / w_total
+            for w in range(horizon_weeks)
+        ]
+        model_predictions["ensemble"] = ens
+
+        for model_name, preds in model_predictions.items():
+            for w in range(horizon_weeks):
+                week_date = (global_last + pd.Timedelta(weeks=w + 1)).date()
+                pred_val = float(max(preds[w], 0))
+                z = 1.96 * np.sqrt((w + 1) / 4)
                 all_predictions.append({
                     "id": str(uuid.uuid4()),
                     "model_name": model_name,
                     "sku_id": sku_id,
                     "forecast_date": week_date,
-                    "predicted_demand": round(max(0, pred_val), 1),
-                    "lower_bound": round(max(0, pred_val - z * (std_weekly or avg_weekly * 0.3)), 1),
-                    "upper_bound": round(pred_val + z * (std_weekly or avg_weekly * 0.3), 1),
+                    "predicted_demand": round(pred_val, 1),
+                    "lower_bound": round(max(0, pred_val - z * (std_weekly or forecast_weekly * 0.3)), 1),
+                    "upper_bound": round(pred_val + z * (std_weekly or forecast_weekly * 0.3), 1),
                     "actual_demand": None,
                     "created_at": now,
                 })
-        
-        if (i + 1) % 50 == 0 or i == len(sku_ids) - 1:
-            print(f"   📊 Processed {i + 1}/{len(sku_ids)} SKUs...")
-    
-    print(f"   ✅ Generated {len(all_predictions)} prediction rows")
+
+    print(f"   Generated {len(all_predictions)} prediction rows for {sku_count} SKUs")
     return all_predictions
 
 
@@ -216,10 +197,11 @@ def upload_to_cloud(engine, ensemble, results, predictions):
         conn.commit()
         
         now = datetime.utcnow()
-        model_results = results.get("model_results", {})
-        
+        model_results = results.get("models", {})
+
         for model_name in ["xgboost", "lightgbm", "arima", "sarima", "prophet", "holt_winters"]:
-            metrics = model_results.get(model_name, {})
+            r = model_results.get(model_name, {})
+            metrics = r.get("test_metrics", {}) if isinstance(r, dict) else {}
             if isinstance(metrics, dict):
                 conn.execute(text("""
                     INSERT INTO forecast_models 
@@ -255,55 +237,68 @@ def _model_type(name):
 
 def main():
     parser = argparse.ArgumentParser(description="Train ML models locally and upload results to cloud DB")
-    parser.add_argument("--db-url", type=str, help="Cloud PostgreSQL connection string")
+    parser.add_argument("--db-url", type=str, help="Target database connection string")
+    parser.add_argument("--cloud", action="store_true", help="Explicitly target the production cloud DB (requires confirmation)")
     parser.add_argument("--skip-training", action="store_true", help="Skip training, just upload existing results")
     args = parser.parse_args()
-    
-    print("\n" + "🚀" * 20)
-    print("  VST IMS — Local Training + Cloud Upload")
-    print("🚀" * 20)
-    
-    # Get cloud DB URL
+
+    print("\n" + "=" * 50)
+    print("  VST IMS - Local Training + Upload")
+    print("=" * 50)
+
     db_url = args.db_url or load_cloud_db_url()
     if not db_url:
-        sys.exit(1)
-    
-    print(f"\n   🔗 Cloud DB: {db_url[:50]}...")
-    
-    # Create cloud engine
-    engine = get_cloud_engine(db_url)
-    
-    # Test connection
-    try:
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        print("   ✅ Cloud DB connection successful!")
-    except Exception as e:
-        print(f"   ❌ Cloud DB connection failed: {e}")
-        sys.exit(1)
-    
-    # Train models
+        print("\n   No DATABASE_URL found. Running in LOCAL-ONLY mode (train + local predictions).")
+        db_url = None
+
+    is_production = bool(db_url) and ("supabase" in db_url or "render" in db_url)
+    if is_production:
+        if not args.cloud:
+            print("\n   Target looks like PRODUCTION (Supabase/Render).")
+            print("   Per AGENTS.md, production writes require explicit approval.")
+            print("   Re-run with --cloud to confirm you intend to write production data.")
+            sys.exit(1)
+        answer = input(f"\n   Type YES to write predictions to PRODUCTION: ").strip()
+        if answer != "YES":
+            print("   Aborted.")
+            sys.exit(1)
+
+    engine = get_cloud_engine(db_url) if db_url else None
+    if engine:
+        try:
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print(f"\n   DB connection OK: {db_url[:50]}...")
+        except Exception as e:
+            print(f"\n   DB connection failed: {e}")
+            sys.exit(1)
+
     if not args.skip_training:
         ensemble, results = train_models()
     else:
-        print("\n   ⏭️  Skipping training (using existing models)")
+        print("\n   Skipping training (using existing models)")
         from app.forecasting.ensemble import get_ensemble
         ensemble = get_ensemble()
-        results = {"model_results": {}, "metadata": {}}
-    
-    # Generate predictions
-    predictions = generate_predictions(ensemble)
-    
-    # Upload to cloud
-    upload_to_cloud(engine, ensemble, results, predictions)
-    
+        results = {"models": {}, "metadata": {}}
+
+    target_url = db_url or str(get_settings().DATABASE_URL)
+    predictions = generate_predictions(ensemble, target_url)
+
+    if engine:
+        upload_to_cloud(engine, ensemble, results, predictions)
+    else:
+        from sqlalchemy import create_engine
+        local_engine = create_engine(target_url)
+        upload_to_cloud(local_engine, ensemble, results, predictions)
+        print("   Stored forecasts into the LOCAL database.")
+
     print("\n" + "=" * 60)
-    print("  🎉  ALL DONE!")
+    print("  ALL DONE!")
     print("=" * 60)
-    print(f"  ✅ Models trained and predictions uploaded to cloud DB")
-    print(f"  ✅ Managers can now see updated forecasts at the live URL")
-    print(f"  ⏰ Run this script again next week to refresh predictions")
+    print("  Models trained locally; 12-week predictions stored in the target DB.")
+    print("  Model FILES never leave this machine - only prediction rows upload.")
+    print("  Re-run weekly (or after each SAP sync) to refresh predictions.")
     print("=" * 60 + "\n")
 
 
