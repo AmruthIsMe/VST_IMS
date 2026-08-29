@@ -71,11 +71,10 @@ async def lifespan(app: FastAPI):
             logger.info(f"Light migrations applied: {applied}")
     except Exception as e:
         logger.warning(f"Light migration notice: {e}")
-    if settings.DEPLOYMENT_MODE == "local":
-        try:
-            _seed_demo_users()
-        except Exception as e:
-            logger.warning(f"Demo user seeding notice: {e}")
+    try:
+        _seed_demo_users()
+    except Exception as e:
+        logger.warning(f"Demo user seeding notice: {e}")
     yield
 
 
