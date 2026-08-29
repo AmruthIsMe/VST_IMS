@@ -21,3 +21,5 @@ joblib>=1.4.0
 scipy>=1.14.0
 # LLM / Chatbot
 google-generativeai>=0.8.0
+# Rate limiting
+slowapi>=0.1.9

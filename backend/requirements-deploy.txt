@@ -20,3 +20,6 @@ psycopg2-binary>=2.9.0
 
 # LLM / Chatbot (Genie still works in cloud mode)
 google-generativeai>=0.8.0
+
+# Rate limiting (used in main.py, auth.py, genie.py)
+slowapi>=0.1.9
