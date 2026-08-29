@@ -30,9 +30,18 @@ class Base(DeclarativeBase):
 
 
 LIGHT_MIGRATIONS = {
+    "users": {
+        "password_hash": "VARCHAR(200)",
+        "last_login": "TIMESTAMP",
+        "role": "VARCHAR(50) DEFAULT 'Viewer'",
+        "status": "VARCHAR(20) DEFAULT 'Active'",
+    },
     "sap_config": {"last_sync_at": "DATETIME"},
     "sales": {"created_at": "DATETIME"},
     "sap_sync_log": {"detail_json": "TEXT"},
+    "orders": {"order_type": "VARCHAR(20) DEFAULT 'SALES_ORDER'",
+               "supplier_name": "VARCHAR(200)",
+               "fulfillment_region": "VARCHAR(100)"},
 }
 
 
