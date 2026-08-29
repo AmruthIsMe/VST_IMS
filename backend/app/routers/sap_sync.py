@@ -76,9 +76,29 @@ def _week_monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def _fetch_mock_orders() -> list[dict]:
+def _fetch_mock_orders(last_sync_date: str = None) -> list[dict]:
     import httpx
-    response = httpx.get(f"{SAP_MOCK_URL}/sap/opu/odata/sap/API_SALES_SRV/Sales", timeout=60)
+    params = {}
+    if last_sync_date:
+        params["last_sync_date"] = last_sync_date
+    response = httpx.get(
+        f"{SAP_MOCK_URL}/sap/opu/odata/sap/API_SALES_SRV/Sales",
+        params=params, timeout=60,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Mock ERP returned {response.status_code}")
+    return response.json().get("d", {}).get("results", [])
+
+
+def _fetch_mock_purchase_orders(last_sync_date: str = None) -> list[dict]:
+    import httpx
+    params = {}
+    if last_sync_date:
+        params["last_sync_date"] = last_sync_date
+    response = httpx.get(
+        f"{SAP_MOCK_URL}/sap/opu/odata/sap/API_PO_SRV/PurchaseOrders",
+        params=params, timeout=60,
+    )
     if response.status_code != 200:
         raise RuntimeError(f"Mock ERP returned {response.status_code}")
     return response.json().get("d", {}).get("results", [])
@@ -173,7 +193,109 @@ def _sync_stocks(db: Session) -> dict:
 
 def _sync_orders(db: Session) -> dict:
     from app.models import Order
-    return {"status": "completed", "records_synced": db.query(Order).count()}
+    so_count = db.query(Order).filter(Order.order_type == "SALES_ORDER").count()
+    po_count = db.query(Order).filter(Order.order_type == "PURCHASE_ORDER").count()
+    return {"status": "completed", "records_synced": so_count + po_count,
+            "sales_orders": so_count, "purchase_orders": po_count}
+
+
+def _sync_purchase_orders(db: Session) -> dict:
+    """Fetch purchase orders from mock ERP and ingest as Order + OrderItem records."""
+    config = _get_config(db)
+    last_sync = config.last_sync_at.isoformat() if config.last_sync_at else None
+
+    try:
+        po_orders = _fetch_mock_purchase_orders(last_sync_date=last_sync)
+    except Exception as e:
+        logger.warning(f"SAP unreachable during PO sync ({e})")
+        return {"status": "completed", "records_synced": 0, "warning": str(e)}
+
+    pid_by_sku = {}
+    for r in db.execute(sql_text("SELECT sku_id, id FROM products")).fetchall():
+        pid_by_sku[r[0]] = r[1]
+
+    existing_pos = set()
+    for r in db.execute(sql_text("SELECT sap_po_number FROM orders WHERE sap_po_number IS NOT NULL")).fetchall():
+        existing_pos.add(r[0])
+
+    now = datetime.utcnow()
+    inserted = 0
+    skipped = 0
+
+    for po in po_orders:
+        ebeln = po.get("EBELN", "")
+        if not ebeln or ebeln in existing_pos:
+            skipped += 1
+            continue
+
+        try:
+            bedat = datetime.strptime(po["BEDAT"], "%Y-%m-%d").date()
+        except (ValueError, KeyError):
+            bedat = date.today()
+
+        status_map = {
+            "delivered": "Completed",
+            "in_transit": "Shipped",
+            "pending": "Processing",
+        }
+        order_status = status_map.get(po.get("status", ""), "Processing")
+
+        order_uuid = _uuid()
+        items_data = po.get("items", [])
+        total = sum(it.get("NETWR", 0) for it in items_data)
+
+        db.execute(sql_text("""
+            INSERT INTO orders (id, order_id, order_date, customer_name, supplier_name,
+                                order_type, total_amount_inr, payment_status, order_status,
+                                sap_po_number, last_synced_at, created_at, updated_at)
+            VALUES (:id, :oid, :odate, :cust, :sup, :otype, :total, :pstatus, :ostatus,
+                    :sap_po, :lsync, :created, :updated)
+        """), {
+            "id": order_uuid,
+            "oid": ebeln,
+            "odate": bedat,
+            "cust": po.get("LNAME", ""),
+            "sup": po.get("LNAME", ""),
+            "otype": "PURCHASE_ORDER",
+            "total": round(total, 2),
+            "pstatus": "Paid" if order_status == "Completed" else "Pending",
+            "ostatus": order_status,
+            "sap_po": ebeln,
+            "lsync": now,
+            "created": now,
+            "updated": now,
+        })
+
+        for it in items_data:
+            matnr = it.get("MATNR", "")
+            product_id = pid_by_sku.get(matnr)
+            if not product_id:
+                continue
+            qty = int(it.get("KWMENG", 0))
+            unit_price = round(it.get("NETWR", 0) / max(qty, 1), 2)
+            db.execute(sql_text("""
+                INSERT INTO order_items (id, order_id, product_id, quantity,
+                                         unit_price_inr, total_price_inr)
+                VALUES (:id, :oid, :pid, :qty, :uprice, :tprice)
+            """), {
+                "id": _uuid(),
+                "oid": order_uuid,
+                "pid": product_id,
+                "qty": qty,
+                "uprice": unit_price,
+                "tprice": round(it.get("NETWR", 0), 2),
+            })
+
+        inserted += 1
+        existing_pos.add(ebeln)
+
+    db.commit()
+    return {
+        "status": "completed",
+        "records_synced": inserted,
+        "skipped_duplicates": skipped,
+        "total_fetched": len(po_orders),
+    }
 
 
 SIM_REGION = "SIMULATED"
@@ -318,8 +440,11 @@ def _sync_sales(db: Session) -> dict:
     - Raw SQL + exact product_id strings from the table (UUID-format safe).
     - After ingestion, backfills/simulates any gap so data always reaches TODAY.
     """
+    config = _get_config(db)
+    last_sync = config.last_sync_at.isoformat() if config.last_sync_at else None
+
     try:
-        orders = _fetch_mock_orders()
+        orders = _fetch_mock_orders(last_sync_date=last_sync)
         fetch_warning = None
     except Exception as e:
         logger.warning(f"SAP unreachable during sales sync ({e}) — continuing with backfill only")
@@ -356,33 +481,40 @@ def _sync_sales(db: Session) -> dict:
     fetched_unknown = 0
     duplicate_orders = 0
     for order in orders:
-        matnr = order.get("MATNR", "")
-        product_id = pid_by_sku.get(matnr)
-        sku_id = matnr
-        if product_id is None:
-            mapped = pid_by_sap.get(matnr)
-            if mapped:
-                sku_id, product_id = mapped
-            else:
-                fetched_unknown += 1
-                continue
         raw_date = order.get("ERDAT", "")
         try:
             day = datetime.strptime(raw_date, "%Y-%m-%d").date()
         except ValueError:
             continue
-        qty = int(order.get("KWMENG", 0))
-        if qty <= 0:
-            continue
         week = _week_monday(day)
-        key = (sku_id, week)
-        # Completed weeks are immutable unless they hold simulated rows;
-        # the LIVE week is always refreshed with SAP's latest totals.
-        if key in existing_pairs and key not in simulated_pairs and week != current_week:
-            duplicate_orders += 1
-            continue
-        bucket = buckets.setdefault(key, {"qty": 0, "region": order.get("REGIO"), "pid": product_id})
-        bucket["qty"] += qty
+
+        order_items = order.get("items", [])
+        if not order_items:
+            matnr = order.get("MATNR", "")
+            qty = int(order.get("KWMENG", 0))
+            if matnr and qty > 0:
+                order_items = [{"MATNR": matnr, "KWMENG": qty}]
+
+        for item in order_items:
+            matnr = item.get("MATNR", "")
+            product_id = pid_by_sku.get(matnr)
+            sku_id = matnr
+            if product_id is None:
+                mapped = pid_by_sap.get(matnr)
+                if mapped:
+                    sku_id, product_id = mapped
+                else:
+                    fetched_unknown += 1
+                    continue
+            qty = int(item.get("KWMENG", 0))
+            if qty <= 0:
+                continue
+            key = (sku_id, week)
+            if key in existing_pairs and key not in simulated_pairs and week != current_week:
+                duplicate_orders += 1
+                continue
+            bucket = buckets.setdefault(key, {"qty": 0, "region": order.get("REGIO"), "pid": product_id})
+            bucket["qty"] += qty
 
     now = datetime.utcnow()
     # Live-week rows get replaced by fresh SAP actuals; simulated rows are
@@ -450,6 +582,7 @@ _SYNC_MODULES = {
     "stocks": _sync_stocks,
     "orders": _sync_orders,
     "sales": _sync_sales,
+    "purchase_orders": _sync_purchase_orders,
 }
 
 

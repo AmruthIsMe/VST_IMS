@@ -79,7 +79,7 @@ def _verify_password(plain: str, hashed: Optional[str]) -> bool:
         return True
     try:
         from passlib.context import CryptContext
-        pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+        pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
         if pwd_context.verify(plain, hashed):
             return True
     except Exception:
@@ -97,7 +97,7 @@ def _verify_password(plain: str, hashed: Optional[str]) -> bool:
 def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     import uuid
     from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+    pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
 
     username = (req.username or "").strip()
     if not username:
@@ -105,25 +105,25 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
 
     logger.info(f"Login attempt for: '{username}'")
 
+    is_demo_password = (req.password == "vst2026")
+    demo_meta = DEMO_ACCOUNTS.get(username.lower())
+
     user = db.query(User).filter(
         (User.user_id.ilike(username)) | (User.email.ilike(username))
     ).first()
 
-    # Self-healing: if demo account credentials ('vst2026') are supplied
-    is_demo_password = (req.password == "vst2026")
-    demo_meta = DEMO_ACCOUNTS.get(username.lower())
+    if not user and is_demo_password and demo_meta:
+        # Check if user exists by the demo account's user_id or email
+        user = db.query(User).filter(
+            (User.user_id.ilike(demo_meta["user_id"])) | (User.email.ilike(demo_meta["email"]))
+        ).first()
 
     if user:
         valid_pw = _verify_password(req.password, user.password_hash)
         if not valid_pw and is_demo_password and demo_meta:
-            # Repair outdated hash for demo account
             user.password_hash = pwd_context.hash("vst2026")
             user.status = "Active"
             valid_pw = True
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
 
         if not valid_pw:
             logger.warning(f"Invalid password for user: '{username}'")
@@ -138,7 +138,6 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
                 detail="Account is not active",
             )
     else:
-        # User not found in DB — if it's a valid demo credential, provision immediately on-the-fly
         if is_demo_password and demo_meta:
             logger.info(f"Auto-provisioning demo user '{demo_meta['user_id']}' on login")
             now = datetime.utcnow()
@@ -153,13 +152,7 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
                 created_at=now,
                 updated_at=now,
             )
-            try:
-                db.add(user)
-                db.commit()
-                db.refresh(user)
-            except Exception as e:
-                db.rollback()
-                logger.warning(f"Could not persist auto-provisioned user: {e}")
+            db.add(user)
         else:
             logger.warning(f"User not found: '{username}'")
             raise HTTPException(
@@ -167,28 +160,43 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
                 detail="Invalid username or password",
             )
 
+    # Read all attributes into plain Python variables BEFORE any commit
+    user_id_val = str(user.user_id)
+    user_name_val = str(user.name or "")
+    user_email_val = str(user.email or "")
+    user_role_val = str(user.role or "Viewer")
+    user_status_val = str(user.status or "Active")
+    user_db_id = str(user.id)
+
+    # Now update last_login and commit
     try:
-        user.last_login = datetime.utcnow()
+        db.execute(
+            text("UPDATE users SET last_login = :now WHERE user_id = :uid"),
+            {"now": datetime.utcnow(), "uid": user_id_val},
+        )
         db.commit()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Notice during login commit: {e}")
         db.rollback()
 
     token = create_access_token(
-        data={"sub": user.user_id, "role": user.role, "name": user.name, "email": user.email}
+        data={"sub": user_id_val, "role": user_role_val, "name": user_name_val, "email": user_email_val}
     )
 
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": {
-            "id": str(user.id),
-            "user_id": user.user_id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "status": user.status,
+            "id": user_db_id,
+            "user_id": user_id_val,
+            "name": user_name_val,
+            "email": user_email_val,
+            "role": user_role_val,
+            "status": user_status_val,
         },
     }
+
+
 
 
 @router.get("/me")

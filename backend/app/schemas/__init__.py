@@ -122,6 +122,7 @@ class OrderItemCreate(OrderItemBase):
 
 class OrderItemResponse(OrderItemBase):
     id: UUID
+    sku_id: Optional[str] = None
     total_price_inr: float
 
     model_config = {"from_attributes": True}
@@ -131,10 +132,13 @@ class OrderBase(BaseModel):
     order_id: str
     order_date: date
     customer_name: Optional[str] = None
+    supplier_name: Optional[str] = None
+    order_type: str = "SALES_ORDER"
     total_amount_inr: float
     payment_status: str
     order_status: str
     sap_po_number: Optional[str] = None
+    fulfillment_region: Optional[str] = None
 
 
 class OrderCreate(OrderBase):
@@ -143,10 +147,13 @@ class OrderCreate(OrderBase):
 
 class OrderUpdate(BaseModel):
     customer_name: Optional[str] = None
+    supplier_name: Optional[str] = None
+    order_type: Optional[str] = None
     total_amount_inr: Optional[float] = None
     payment_status: Optional[str] = None
     order_status: Optional[str] = None
     sap_po_number: Optional[str] = None
+    fulfillment_region: Optional[str] = None
 
 
 class OrderResponse(OrderBase):
@@ -157,6 +164,18 @@ class OrderResponse(OrderBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class StockMovementResponse(BaseModel):
+    id: str
+    matnr: str
+    quantity: int
+    direction: str
+    movement_type: str
+    order_id: str
+    order_date: str
+    stock_after: int
+    timestamp: str
 
 
 class SaleBase(BaseModel):

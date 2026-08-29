@@ -41,6 +41,9 @@ export const deleteSupplier = (id) => api.delete(`/suppliers/${id}`);
 // Orders
 export const getOrders = (params) => api.get('/orders', { params });
 export const getOrder = (id) => api.get(`/orders/${id}`);
+export const getOrderItems = (id) => api.get(`/orders/${id}/items`);
+export const getSapOrders = (params) => api.get('/orders/sap-orders', { params });
+export const getStockMovements = (params) => api.get('/orders/stock-movements', { params });
 export const createOrder = (data) => api.post('/orders', data);
 export const updateOrder = (id, data) => api.put(`/orders/${id}`, data);
 export const deleteOrder = (id) => api.delete(`/orders/${id}`);

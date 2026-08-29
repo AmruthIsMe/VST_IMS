@@ -25,7 +25,7 @@ def _seed_demo_users():
     from datetime import datetime
     import uuid
 
-    pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+    pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
     db = SessionLocal()
     try:
         demo_users = [
