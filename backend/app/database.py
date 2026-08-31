@@ -7,19 +7,25 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+# Build engine — SQLite gets check_same_thread + WAL; PostgreSQL uses connection pooling
 connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
+engine_kwargs = {}
+
+if settings.is_postgres:
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_size"] = 5
+    engine_kwargs["max_overflow"] = 10
+else:
     connect_args["check_same_thread"] = False
 
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,
     connect_args=connect_args,
-    pool_size=5,
-    max_overflow=10,
+    **engine_kwargs,
 )
 
-if settings.DATABASE_URL.startswith("sqlite"):
+# SQLite-specific pragmas
+if not settings.is_postgres:
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
@@ -34,6 +40,8 @@ class Base(DeclarativeBase):
     pass
 
 
+# Columns that may not exist in older database schemas.
+# Only tables that are actively queried on every request are listed here.
 LIGHT_MIGRATIONS = {
     "users": {
         "password_hash": "VARCHAR(200)",
@@ -61,21 +69,10 @@ def run_light_migrations() -> list[str]:
     create_all only adds new tables, never new columns — this bridges the gap
     for both SQLite (build) and PostgreSQL (cloud)."""
     applied = []
-    is_postgres = settings.DATABASE_URL.startswith("postgresql")
     try:
         with engine.connect() as conn:
             for table, cols in LIGHT_MIGRATIONS.items():
-                try:
-                    if is_postgres:
-                        result = conn.execute(text(
-                            f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}'"
-                        ))
-                        existing = {row[0] for row in result}
-                    else:
-                        result = conn.execute(text(f"PRAGMA table_info({table})"))
-                        existing = {row[1] for row in result}
-                except Exception:
-                    existing = set()
+                existing = _get_existing_columns(conn, table)
                 if not existing:
                     continue
                 for col, ddl in cols.items():
@@ -89,6 +86,22 @@ def run_light_migrations() -> list[str]:
     except Exception as e:
         logger.error(f"Light migrations failed: {e}")
     return applied
+
+
+def _get_existing_columns(conn, table: str) -> set[str]:
+    """Return the set of existing column names for a table."""
+    try:
+        if settings.is_postgres:
+            result = conn.execute(text(
+                f"SELECT column_name FROM information_schema.columns "
+                f"WHERE table_name = '{table}'"
+            ))
+            return {row[0] for row in result}
+        else:
+            result = conn.execute(text(f"PRAGMA table_info({table})"))
+            return {row[1] for row in result}
+    except Exception:
+        return set()
 
 
 def get_db():

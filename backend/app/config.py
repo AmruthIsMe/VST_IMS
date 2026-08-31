@@ -50,6 +50,14 @@ class Settings(BaseSettings):
                 return [i.strip() for i in v.split(",")]
         return v
 
+    @property
+    def is_cloud(self) -> bool:
+        return self.DEPLOYMENT_MODE.lower() == "cloud"
+
+    @property
+    def is_postgres(self) -> bool:
+        return self.DATABASE_URL.startswith("postgresql")
+
     model_config = {
         "env_file": os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
         "extra": "ignore",
@@ -58,4 +66,11 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    if s.is_cloud and not s.is_postgres:
+        import logging
+        logging.getLogger(__name__).error(
+            "DEPLOYMENT_MODE=cloud but DATABASE_URL is not PostgreSQL! "
+            "Set DATABASE_URL to your Supabase PostgreSQL URL in Render Dashboard."
+        )
+    return s
