@@ -96,13 +96,7 @@ def list_products(
     except Exception as e:
         logger.error(f"Failed to fetch products: {e}", exc_info=True)
         db.rollback()
-        return PaginatedResponse(
-            items=[],
-            total=0,
-            page=page,
-            page_size=page_size,
-            total_pages=0,
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {str(e)}")
 
 
 @router.get("/categories")

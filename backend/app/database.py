@@ -41,6 +41,12 @@ LIGHT_MIGRATIONS = {
         "role": "VARCHAR(50) DEFAULT 'Viewer'",
         "status": "VARCHAR(20) DEFAULT 'Active'",
     },
+    "products": {
+        "unit_cost_inr": "DOUBLE PRECISION",
+    },
+    "inventory": {
+        "unit_cost_inr": "DOUBLE PRECISION",
+    },
     "sap_config": {"last_sync_at": "DATETIME"},
     "sales": {"created_at": "DATETIME"},
     "sap_sync_log": {"detail_json": "TEXT"},
