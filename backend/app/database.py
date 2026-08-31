@@ -67,39 +67,40 @@ LIGHT_MIGRATIONS = {
 def run_light_migrations() -> list[str]:
     """Idempotent column additions for tables that already exist.
     create_all only adds new tables, never new columns — this bridges the gap
-    for both SQLite (build) and PostgreSQL (cloud)."""
+    for both SQLite (build) and PostgreSQL (cloud).
+
+    Each ALTER TABLE is committed independently so one failure
+    does not abort the entire transaction (PostgreSQL behavior)."""
     applied = []
-    try:
-        with engine.connect() as conn:
-            for table, cols in LIGHT_MIGRATIONS.items():
-                existing = _get_existing_columns(conn, table)
-                if not existing:
-                    continue
-                for col, ddl in cols.items():
-                    if col not in existing:
-                        try:
-                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
-                            applied.append(f"{table}.{col}")
-                        except Exception as e:
-                            logger.warning(f"Migration note for {table}.{col}: {e}")
-            conn.commit()
-    except Exception as e:
-        logger.error(f"Light migrations failed: {e}")
+    for table, cols in LIGHT_MIGRATIONS.items():
+        existing = _get_existing_columns_raw(table)
+        if not existing:
+            continue
+        for col, ddl in cols.items():
+            if col not in existing:
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+                        conn.commit()
+                        applied.append(f"{table}.{col}")
+                except Exception as e:
+                    logger.warning(f"Migration skip {table}.{col}: {e}")
     return applied
 
 
-def _get_existing_columns(conn, table: str) -> set[str]:
-    """Return the set of existing column names for a table."""
+def _get_existing_columns_raw(table: str) -> set[str]:
+    """Return the set of existing column names for a table (standalone connection)."""
     try:
-        if settings.is_postgres:
-            result = conn.execute(text(
-                f"SELECT column_name FROM information_schema.columns "
-                f"WHERE table_name = '{table}'"
-            ))
-            return {row[0] for row in result}
-        else:
-            result = conn.execute(text(f"PRAGMA table_info({table})"))
-            return {row[1] for row in result}
+        with engine.connect() as conn:
+            if settings.is_postgres:
+                result = conn.execute(text(
+                    f"SELECT column_name FROM information_schema.columns "
+                    f"WHERE table_name = :tbl"
+                ), {"tbl": table})
+                return {row[0] for row in result}
+            else:
+                result = conn.execute(text(f"PRAGMA table_info({table})"))
+                return {row[1] for row in result}
     except Exception:
         return set()
 
