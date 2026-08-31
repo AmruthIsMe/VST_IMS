@@ -239,7 +239,7 @@ class StockAdvisorAgent:
                 else:
                     estimated_stock = round(avg_weekly * 8)  # 8 weeks coverage
                     stock_source = "burn_rate_estimate"
-                coverage_weeks = round(estimated_stock / avg_weekly, 1) if avg_weekly > 0 else 99
+                coverage_weeks = round(estimated_stock / avg_weekly, 1) if avg_weekly > 0 else None
                 skus.append({
                     "sku_id": r["sku_id"],
                     "category": r["category"],

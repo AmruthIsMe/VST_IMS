@@ -385,17 +385,23 @@ export default function Dashboard({ onMenuToggle }) {
                     <td style={{ fontWeight: 600 }}>{r.estimated_stock.toLocaleString()}</td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 60, height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                          <div style={{
-                            width: `${Math.min((r.coverage_weeks / 12) * 100, 100)}%`,
-                            height: '100%',
-                            backgroundColor: r.coverage_weeks < 4 ? '#dc2626' : r.coverage_weeks < 6 ? '#f59e0b' : r.coverage_weeks < 8 ? '#3b82f6' : '#16a34a',
-                            borderRadius: 3,
-                          }} />
-                        </div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: r.coverage_weeks < 4 ? '#dc2626' : r.coverage_weeks < 6 ? '#b54708' : '#1a1d1a' }}>
-                          {r.coverage_weeks}w
-                        </span>
+                        {r.coverage_weeks != null ? (
+                          <>
+                            <div style={{ width: 60, height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{
+                                width: `${Math.min((r.coverage_weeks / 12) * 100, 100)}%`,
+                                height: '100%',
+                                backgroundColor: r.coverage_weeks < 4 ? '#dc2626' : r.coverage_weeks < 6 ? '#f59e0b' : r.coverage_weeks < 8 ? '#3b82f6' : '#16a34a',
+                                borderRadius: 3,
+                              }} />
+                            </div>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: r.coverage_weeks < 4 ? '#dc2626' : r.coverage_weeks < 6 ? '#b54708' : '#1a1d1a' }}>
+                              {r.coverage_weeks}w
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#667085' }}>N/A</span>
+                        )}
                       </div>
                     </td>
                     <td style={{ fontWeight: 600 }}>{r.forecast_12w_demand.toLocaleString()}</td>

@@ -220,13 +220,13 @@ def stockout_risk(weeks_ahead: int = 12, db: Session = Depends(get_db)):
         quantity_on_hand = stock_map.get(sku, 0)
 
         # Coverage: how many weeks the current stock lasts at forecasted demand
-        coverage_weeks = round(quantity_on_hand / forecast_weekly, 1) if forecast_weekly > 0 else 99
+        coverage_weeks = round(quantity_on_hand / forecast_weekly, 1) if forecast_weekly > 0 else None
 
         # 12-week demand forecast
         forecast_12w = int(forecast_weekly * weeks_ahead)
 
         # Shortfall
-        shortfall = round(max(weeks_ahead - coverage_weeks, 0), 1)
+        shortfall = round(max(weeks_ahead - coverage_weeks, 0), 1) if coverage_weeks is not None else 0
 
         # Risk level
         risk = get_risk_level(coverage_weeks, trend, 0)

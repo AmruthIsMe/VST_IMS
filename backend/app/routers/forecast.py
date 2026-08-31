@@ -735,16 +735,17 @@ async def sku_explorer(
             forecast_lower.append(max(0, round(float(forecast_weekly - z * base_sigma), 1)))
 
         estimated_stock = round(avg_weekly * 8)
-        coverage_weeks = round(estimated_stock / forecast_weekly, 1) if forecast_weekly > 0 else 99
+        coverage_weeks = round(estimated_stock / forecast_weekly, 1) if forecast_weekly > 0 else None
 
         stockout_alert = None
-        severity = get_stockout_severity(coverage_weeks)
-        if severity:
-            stockout_alert = {
-                "severity": severity,
-                "message": f"Estimated stock covers only {coverage_weeks} weeks at forecasted demand ({round(forecast_weekly)}/wk). Recommend immediate reorder.",
-                "weeks_until_stockout": coverage_weeks,
-            }
+        if coverage_weeks is not None:
+            severity = get_stockout_severity(coverage_weeks)
+            if severity:
+                stockout_alert = {
+                    "severity": severity,
+                    "message": f"Estimated stock covers only {coverage_weeks} weeks at forecasted demand ({round(forecast_weekly)}/wk). Recommend immediate reorder.",
+                    "weeks_until_stockout": coverage_weeks,
+                }
 
         return {
             "status": "success",
@@ -920,9 +921,9 @@ async def reorder_recommendations(db: Session = Depends(get_db)):
 
         sku_stats["estimated_stock"] = sku_stats["sku_id"].map(stock_map).fillna(0).astype(int)
 
-        sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99)
+        sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], np.nan)
 
-        needs_reorder = sku_stats[sku_stats["coverage_weeks"] < 8].copy()
+        needs_reorder = sku_stats[sku_stats["coverage_weeks"].fillna(99) < 8].copy()
 
         if suppliers_df is not None and len(suppliers_df) > 0:
             cat_lead_time = suppliers_df.groupby("primary_category")["lead_time_days"].mean().to_dict()
@@ -1109,10 +1110,11 @@ async def export_forecast_csv(horizon_weeks: int = Query(12)):
         sku_stats["forecast_weekly"] = (sku_stats["avg_weekly"] * sku_stats["trend_ratio"]).round(1)
         sku_stats["forecast_12w"] = (sku_stats["forecast_weekly"] * horizon_weeks).round(0).astype(int)
         sku_stats["estimated_stock"] = (sku_stats["avg_weekly"] * 8).round(0).astype(int)
-        sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99).round(1)
+        sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], np.nan).round(1)
         sku_stats["shortfall_weeks"] = np.maximum(horizon_weeks - sku_stats["coverage_weeks"], 0).round(1)
 
         def risk_level(cov, trend):
+            if pd.isna(cov): return "LOW"
             if cov < 4 or (cov < 6 and trend > 1.1): return "CRITICAL"
             elif cov < 6: return "HIGH"
             elif cov < 8: return "MEDIUM"

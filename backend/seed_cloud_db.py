@@ -369,6 +369,15 @@ def main():
     print(f"  VST IMS — Database Seeder ({mode_label})")
     print("🌱" * 20)
 
+    if cloud_mode:
+        print("\n  ⚠️  WARNING: This will DELETE ALL production data in the cloud database!")
+        print("  ⚠️  Sales, orders, SAP sync logs, and all other data will be permanently lost.")
+        print("  ⚠️  This should ONLY be run on a fresh database or during initial setup.")
+        confirm = input("\n  Type 'YES-DELETE-PRODUCTION-DATA' to confirm: ").strip()
+        if confirm != "YES-DELETE-PRODUCTION-DATA":
+            print("  ❌ Aborted. No changes made.")
+            sys.exit(0)
+
     db_url = load_db_url(cloud_mode=cloud_mode)
     print(f"\n   🔗 DB: {db_url[:60]}...")
 

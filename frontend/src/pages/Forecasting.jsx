@@ -66,8 +66,16 @@ export default function Forecasting({ onMenuToggle }) {
   // Clamp date range to available data when SKU changes
   useEffect(() => {
     if (yearlyData?.min_date && yearlyData?.max_date) {
-      setDateFrom((prev) => prev < yearlyData.min_date ? yearlyData.min_date : prev);
-      setDateTo((prev) => prev > yearlyData.max_date ? yearlyData.max_date : prev);
+      setDateFrom((prev) => {
+        if (prev < yearlyData.min_date) return yearlyData.min_date;
+        if (prev > yearlyData.max_date) return yearlyData.min_date;
+        return prev;
+      });
+      setDateTo((prev) => {
+        if (prev > yearlyData.max_date) return yearlyData.max_date;
+        if (prev < yearlyData.min_date) return yearlyData.max_date;
+        return prev;
+      });
     }
   }, [yearlyData?.min_date, yearlyData?.max_date, selectedSku]);
 
@@ -279,8 +287,8 @@ export default function Forecasting({ onMenuToggle }) {
                           <div style={{ width: 30, height: 30, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fffaeb', color: '#b54708' }}><Clock size={16} /></div>
                         </div>
                         <div style={{ fontSize: 11, color: '#667085', fontWeight: 600 }}>Coverage</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: skuData.stats?.coverage_weeks < 6 ? '#dc2626' : '#1a1d1a', lineHeight: 1.2 }}>
-                          {skuData.stats?.coverage_weeks} weeks
+                        <div style={{ fontSize: 18, fontWeight: 800, color: skuData.stats?.coverage_weeks != null && skuData.stats?.coverage_weeks < 6 ? '#dc2626' : '#1a1d1a', lineHeight: 1.2 }}>
+                          {skuData.stats?.coverage_weeks != null ? `${skuData.stats.coverage_weeks} weeks` : 'No demand'}
                         </div>
                         <div style={{ fontSize: 11, color: '#667085' }}>Est. stock: {skuData.stats?.estimated_stock}</div>
                       </div>
@@ -492,8 +500,8 @@ export default function Forecasting({ onMenuToggle }) {
                           <td style={{ fontWeight: 600, fontSize: 11, padding: '6px 10px' }}>{r.forecast_weekly}</td>
                           <td style={{ fontWeight: 600, fontSize: 11, padding: '6px 10px' }}>{r.estimated_stock}</td>
                           <td style={{ padding: '6px 10px' }}>
-                            <span style={{ fontWeight: 600, fontSize: 11, color: r.coverage_weeks < 4 ? '#dc2626' : r.coverage_weeks < 6 ? '#b54708' : '#1a1d1a' }}>
-                              {r.coverage_weeks}w
+                            <span style={{ fontWeight: 600, fontSize: 11, color: r.coverage_weeks != null && r.coverage_weeks < 4 ? '#dc2626' : r.coverage_weeks != null && r.coverage_weeks < 6 ? '#b54708' : '#1a1d1a' }}>
+                              {r.coverage_weeks != null ? `${r.coverage_weeks}w` : 'N/A'}
                             </span>
                           </td>
                           <td style={{ fontSize: 11, padding: '6px 10px' }}>{r.lead_time_days}d</td>

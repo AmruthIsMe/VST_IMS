@@ -245,7 +245,7 @@ export default function Genie({ onMenuToggle }) {
                             <td>{s.category}</td>
                             <td>{s.avg_weekly_demand}</td>
                             <td>{s.estimated_stock}</td>
-                            <td>{s.coverage_weeks}w</td>
+                            <td>{s.coverage_weeks != null ? `${s.coverage_weeks}w` : 'N/A'}</td>
                           </tr>
                         ))}
                       </tbody>
