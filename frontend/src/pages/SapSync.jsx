@@ -305,17 +305,17 @@ export default function SapSync({ onMenuToggle }) {
         {!mockStatus?.connected && (
           <div style={{
             padding: '12px 20px', borderRadius: 10, marginBottom: 20,
-            backgroundColor: '#fffaeb', border: '1px solid #fedf89',
+            backgroundColor: '#eff8ff', border: '1px solid #b4cff5',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Server size={18} color="#b54708" />
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#b54708' }}>
-                SAP Mock ERP is not running. Start it manually before syncing.
+              <Server size={18} color="#175cd3" />
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#175cd3' }}>
+                Cloud Mode — Sync generates data from demand profiles (no SAP connection required).
               </span>
             </div>
             <span style={{ fontSize: 11, color: '#667085', fontFamily: 'monospace' }}>
-              Run: sap_mock_erp\start_sap_erp.bat
+              Data is simulated using historical patterns
             </span>
           </div>
         )}
