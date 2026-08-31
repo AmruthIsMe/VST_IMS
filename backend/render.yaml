@@ -11,10 +11,12 @@ services:
         value: cloud
       - key: CORS_ORIGINS
         value: '["https://vst-ims.vercel.app", "http://localhost:5173", "http://localhost:3000"]'
+      - key: CORS_ORIGIN_REGEX
+        value: '^https:\/\/.*\.vercel\.app$|^http:\/\/localhost(:\d+)?$'
       - key: DATABASE_URL
         sync: false  # Paste your Supabase PostgreSQL URL in Render Dashboard
       - key: GEMINI_API_KEY
         sync: false  # Paste your Gemini API key in Render Dashboard
       - key: SECRET_KEY
-        sync: false  # Paste your secret key in Render Dashboard
+        value: 'vst-prod-secret-key-2026-change-me'
 

@@ -95,17 +95,15 @@ async def get_predictions(
     db: Session = Depends(get_db),
 ):
     """Get demand predictions from ensemble or specific model."""
-    # --- Cloud mode: read pre-computed predictions from DB ---
-    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
-        return _predict_from_db(db, sku_id=sku_id, category=category, horizon_weeks=horizon_weeks)
-
-    ensemble = get_ensemble()
-
-    if not ensemble.is_trained:
-        return {"status": "not_trained", "message": "Models not trained yet. Call POST /api/forecast/train first."}
-
     try:
-        # Prepare features for ML models
+        if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+            return _predict_from_db(db, sku_id=sku_id, category=category, horizon_weeks=horizon_weeks)
+
+        ensemble = get_ensemble()
+
+        if not ensemble.is_trained:
+            return {"status": "not_trained", "message": "Models not trained yet. Call POST /api/forecast/train first."}
+
         dataset = prepare_dataset(sku_id=sku_id, category=category, test_weeks=0)
         test_df = dataset["test"] if len(dataset["test"]) > 0 else dataset["train"].tail(horizon_weeks)
         feature_cols = dataset["feature_cols"]
@@ -119,19 +117,17 @@ async def get_predictions(
             model_name=model if model != "ensemble" else None,
         )
 
-        # Add dates
         dates = test_df["Date"].values[-horizon_weeks:]
         result["dates"] = [str(d)[:10] for d in dates] if len(dates) > 0 else []
 
-        # Add actuals if available
         if "target" in test_df.columns:
             actuals = test_df["target"].values[-horizon_weeks:]
             result["actuals"] = actuals.tolist()
 
         return {"status": "success", "data": result}
     except Exception as e:
-        logger.error(f"Prediction failed: {e}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Prediction failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Prediction failed: {str(e)}"}
 
 
 @router.get("/compare")
@@ -141,15 +137,15 @@ async def compare_models(
     db: Session = Depends(get_db),
 ):
     """Compare all model predictions side-by-side on test data."""
-    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
-        return _compare_from_db(db, sku_id=sku_id)
-
-    ensemble = get_ensemble()
-
-    if not ensemble.is_trained:
-        return {"status": "not_trained", "message": "Models not trained yet."}
-
     try:
+        if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+            return _compare_from_db(db, sku_id=sku_id)
+
+        ensemble = get_ensemble()
+
+        if not ensemble.is_trained:
+            return {"status": "not_trained", "message": "Models not trained yet."}
+
         dataset = prepare_dataset(sku_id=sku_id, category=category)
         test_df = dataset["test"]
         feature_cols = dataset["feature_cols"]
@@ -161,7 +157,6 @@ async def compare_models(
         y_test = test_df["target"].values
         dates = [str(d)[:10] for d in test_df["Date"].values]
 
-        # Get predictions from all models
         all_preds = {}
         for model_name, model in ensemble.models.items():
             try:
@@ -173,7 +168,6 @@ async def compare_models(
                     if len(preds) >= len(y_test):
                         all_preds[model_name] = preds[:len(y_test)]
                     else:
-                        # Pad with last value
                         padded = np.full(len(y_test), preds[-1] if len(preds) > 0 else 0)
                         padded[:len(preds)] = preds
                         all_preds[model_name] = padded
@@ -182,7 +176,6 @@ async def compare_models(
 
         comparison = ensemble.get_comparison(y_test, all_preds)
 
-        # Add chart data
         chart_data = {
             "dates": dates,
             "actual": y_test.tolist(),
@@ -196,8 +189,8 @@ async def compare_models(
             "weights": ensemble.weights,
         }
     except Exception as e:
-        logger.error(f"Comparison failed: {e}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Comparison failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Comparison failed: {str(e)}"}
 
 
 @router.get("/metrics")
@@ -447,57 +440,59 @@ async def get_training_history(
 @router.get("/summary")
 async def get_forecast_summary(db: Session = Depends(get_db)):
     """AI-generated summary of forecasting performance."""
-    if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
-        return _summary_from_db(db)
+    try:
+        if not ML_AVAILABLE or DEPLOYMENT_MODE == "cloud":
+            return _summary_from_db(db)
 
-    ensemble = get_ensemble()
+        ensemble = get_ensemble()
 
-    if not ensemble.is_trained:
+        if not ensemble.is_trained:
+            return {
+                "summary": "No models trained yet. Click 'Train Models' to begin forecasting.",
+                "status": "not_trained",
+            }
+
+        history = ensemble.get_training_history()
+        latest = history[-1] if history else {}
+
+        raw_mape = latest.get("ensemble_mape")
+        if isinstance(raw_mape, dict):
+            latest_mape = raw_mape.get("mape", "N/A")
+        else:
+            latest_mape = raw_mape if raw_mape is not None else "N/A"
+
+        best_model = None
+        best_mape = 999
+        for name, model in ensemble.models.items():
+            weight = ensemble.weights.get(name, 0)
+            if weight > 0 and weight > (ensemble.weights.get(best_model, 0) if best_model else 0):
+                best_model = name
+
+        summary_parts = [
+            f"📊 **Ensemble trained** with {latest.get('models_trained', 0)} models.",
+            f"🏆 **Best model**: {best_model or 'N/A'} (weight: {ensemble.weights.get(best_model, 0):.1%})",
+            f"📈 **Ensemble MAPE**: {latest_mape}%",
+            f"⏱️ **Training time**: {latest.get('elapsed_seconds', 'N/A')}s",
+        ]
+
+        if len(history) > 1:
+            first_raw = history[0].get("ensemble_mape")
+            first_mape = first_raw.get("mape") if isinstance(first_raw, dict) else first_raw
+            last_mape = latest_mape
+            if first_mape and last_mape and first_mape > 0:
+                improvement = (first_mape - last_mape) / first_mape * 100
+                summary_parts.append(
+                    f"📉 **Improvement**: {improvement:+.1f}% since first training"
+                )
+
         return {
-            "summary": "No models trained yet. Click 'Train Models' to begin forecasting.",
-            "status": "not_trained",
+            "summary": "\n".join(summary_parts),
+            "status": "trained",
+            "latest_training": latest,
         }
-
-    history = ensemble.get_training_history()
-    latest = history[-1] if history else {}
-
-    # ensemble_mape may be a scalar (new runs) or dict (legacy)
-    raw_mape = latest.get("ensemble_mape")
-    if isinstance(raw_mape, dict):
-        latest_mape = raw_mape.get("mape", "N/A")
-    else:
-        latest_mape = raw_mape if raw_mape is not None else "N/A"
-
-    # Build summary
-    best_model = None
-    best_mape = 999
-    for name, model in ensemble.models.items():
-        weight = ensemble.weights.get(name, 0)
-        if weight > 0 and weight > (ensemble.weights.get(best_model, 0) if best_model else 0):
-            best_model = name
-
-    summary_parts = [
-        f"📊 **Ensemble trained** with {latest.get('models_trained', 0)} models.",
-        f"🏆 **Best model**: {best_model or 'N/A'} (weight: {ensemble.weights.get(best_model, 0):.1%})",
-        f"📈 **Ensemble MAPE**: {latest_mape}%",
-        f"⏱️ **Training time**: {latest.get('elapsed_seconds', 'N/A')}s",
-    ]
-
-    if len(history) > 1:
-        first_raw = history[0].get("ensemble_mape")
-        first_mape = first_raw.get("mape") if isinstance(first_raw, dict) else first_raw
-        last_mape = latest_mape
-        if first_mape and last_mape and first_mape > 0:
-            improvement = (first_mape - last_mape) / first_mape * 100
-            summary_parts.append(
-                f"📉 **Improvement**: {improvement:+.1f}% since first training"
-            )
-
-    return {
-        "summary": "\n".join(summary_parts),
-        "status": "trained",
-        "latest_training": latest,
-    }
+    except Exception as e:
+        logger.error(f"Summary failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to generate summary: {str(e)}"}
 
 
 def _get_model_type(name: str) -> str:
@@ -559,107 +554,111 @@ async def list_products(
     from app.database import SessionLocal
     from app.models import Product
 
-    db = SessionLocal()
+    products = []
+
     try:
-        products = db.query(Product).all()
-        if not products:
-            return {"status": "error", "message": "No products found in database"}
+        db = SessionLocal()
+        try:
+            products = db.query(Product).all()
+            if not products:
+                return {"status": "error", "message": "No products found in database"}
 
-        products_df = pd.DataFrame([{
-            "sku_id": p.sku_id,
-            "category": p.category or "Unknown",
-            "sub_category": p.sub_category or "",
-            "machine_compatibility": p.machine_compatibility or "",
-            "shelf_life_days": p.shelf_life_days or 0,
-        } for p in products])
-    finally:
-        db.close()
+            products_df = pd.DataFrame([{
+                "sku_id": p.sku_id,
+                "category": p.category or "Unknown",
+                "sub_category": p.sub_category or "",
+                "machine_compatibility": p.machine_compatibility or "",
+                "shelf_life_days": p.shelf_life_days or 0,
+            } for p in products])
+        finally:
+            db.close()
 
-    sales_df = _load_sales_csv()
-    if sales_df is not None and len(sales_df) > 0:
-        today_ts = pd.Timestamp(date.today())
-        cutoff_13w = today_ts - pd.Timedelta(weeks=13)
-        recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
-        if len(recent) > 0:
-            sku_demand = recent.groupby("sku_id").agg(
-                avg_weekly=("units_sold", "mean"),
-                total_13w=("units_sold", "sum"),
-                weeks_active=("sale_date", "nunique"),
-            ).reset_index()
-            sku_demand["avg_weekly"] = sku_demand["avg_weekly"].round(1)
-            products_df = products_df.merge(sku_demand, on="sku_id", how="left")
+        sales_df = _load_sales_csv()
+        if sales_df is not None and len(sales_df) > 0:
+            today_ts = pd.Timestamp(date.today())
+            cutoff_13w = today_ts - pd.Timedelta(weeks=13)
+            recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
+            if len(recent) > 0:
+                sku_demand = recent.groupby("sku_id").agg(
+                    avg_weekly=("units_sold", "mean"),
+                    total_13w=("units_sold", "sum"),
+                    weeks_active=("sale_date", "nunique"),
+                ).reset_index()
+                sku_demand["avg_weekly"] = sku_demand["avg_weekly"].round(1)
+                products_df = products_df.merge(sku_demand, on="sku_id", how="left")
+            else:
+                products_df["avg_weekly"] = 0
+                products_df["total_13w"] = 0
+                products_df["weeks_active"] = 0
         else:
             products_df["avg_weekly"] = 0
             products_df["total_13w"] = 0
             products_df["weeks_active"] = 0
-    else:
-        products_df["avg_weekly"] = 0
-        products_df["total_13w"] = 0
-        products_df["weeks_active"] = 0
 
-    products_df["avg_weekly"] = products_df["avg_weekly"].fillna(0).round(1)
-    products_df["total_13w"] = products_df["total_13w"].fillna(0)
-    products_df["weeks_active"] = products_df["weeks_active"].fillna(0)
+        products_df["avg_weekly"] = products_df["avg_weekly"].fillna(0).round(1)
+        products_df["total_13w"] = products_df["total_13w"].fillna(0)
+        products_df["weeks_active"] = products_df["weeks_active"].fillna(0)
 
-    # Apply filters
-    if category:
-        products_df = products_df[products_df["category"] == category]
-    if sub_category:
-        products_df = products_df[products_df["sub_category"] == sub_category]
-    if search:
-        search_upper = search.upper()
-        products_df = products_df[
-            products_df["sku_id"].str.upper().str.contains(search_upper) |
-            products_df["category"].str.upper().str.contains(search_upper) |
-            products_df["sub_category"].str.upper().str.contains(search_upper)
-        ]
+        if category:
+            products_df = products_df[products_df["category"] == category]
+        if sub_category:
+            products_df = products_df[products_df["sub_category"] == sub_category]
+        if search:
+            search_upper = search.upper()
+            products_df = products_df[
+                products_df["sku_id"].str.upper().str.contains(search_upper) |
+                products_df["category"].str.upper().str.contains(search_upper) |
+                products_df["sub_category"].str.upper().str.contains(search_upper)
+            ]
 
-    products_df = products_df.sort_values(["avg_weekly"], ascending=[False])
+        products_df = products_df.sort_values(["avg_weekly"], ascending=[False])
 
-    # Get unique filter values from all products
-    all_products_df = pd.DataFrame([{
-        "category": p.category or "Unknown",
-        "sub_category": p.sub_category or "",
-    } for p in products]) if 'products' in dir() else products_df
-    categories = sorted(all_products_df["category"].dropna().unique().tolist())
-    sub_categories = sorted(all_products_df["sub_category"].dropna().unique().tolist()) if sub_category is None else sorted(
-        all_products_df[all_products_df["category"] == category]["sub_category"].dropna().unique().tolist()
-    ) if category else sorted(all_products_df["sub_category"].dropna().unique().tolist())
+        all_products_df = pd.DataFrame([{
+            "category": p.category or "Unknown",
+            "sub_category": p.sub_category or "",
+        } for p in products])
+        categories = sorted(all_products_df["category"].dropna().unique().tolist())
+        sub_categories = sorted(all_products_df["sub_category"].dropna().unique().tolist()) if sub_category is None else sorted(
+            all_products_df[all_products_df["category"] == category]["sub_category"].dropna().unique().tolist()
+        ) if category else sorted(all_products_df["sub_category"].dropna().unique().tolist())
 
-    results = []
-    for _, row in products_df.iterrows():
-        def safe_int(val, default=0):
-            try:
-                return int(float(val)) if pd.notna(val) else default
-            except (ValueError, TypeError):
-                return default
+        results = []
+        for _, row in products_df.iterrows():
+            def safe_int(val, default=0):
+                try:
+                    return int(float(val)) if pd.notna(val) else default
+                except (ValueError, TypeError):
+                    return default
 
-        def safe_float(val, default=0.0):
-            try:
-                return float(val) if pd.notna(val) else default
-            except (ValueError, TypeError):
-                return default
+            def safe_float(val, default=0.0):
+                try:
+                    return float(val) if pd.notna(val) else default
+                except (ValueError, TypeError):
+                    return default
 
-        results.append({
-            "sku_id": row["sku_id"],
-            "category": row.get("category", "Unknown") if pd.notna(row.get("category")) else "Unknown",
-            "sub_category": row.get("sub_category", "") if pd.notna(row.get("sub_category")) else "",
-            "machine_compatibility": row.get("machine_compatibility", "") if pd.notna(row.get("machine_compatibility")) else "",
-            "shelf_life_days": safe_int(row.get("shelf_life_days")),
-            "avg_weekly_demand": safe_float(row.get("avg_weekly")),
-            "total_13w": safe_int(row.get("total_13w")),
-            "weeks_active": safe_int(row.get("weeks_active")),
-        })
+            results.append({
+                "sku_id": row["sku_id"],
+                "category": row.get("category", "Unknown") if pd.notna(row.get("category")) else "Unknown",
+                "sub_category": row.get("sub_category", "") if pd.notna(row.get("sub_category")) else "",
+                "machine_compatibility": row.get("machine_compatibility", "") if pd.notna(row.get("machine_compatibility")) else "",
+                "shelf_life_days": safe_int(row.get("shelf_life_days")),
+                "avg_weekly_demand": safe_float(row.get("avg_weekly")),
+                "total_13w": safe_int(row.get("total_13w")),
+                "weeks_active": safe_int(row.get("weeks_active")),
+            })
 
-    return {
-        "status": "success",
-        "products": results,
-        "total": len(results),
-        "filter_options": {
-            "categories": categories,
-            "sub_categories": sub_categories,
-        },
-    }
+        return {
+            "status": "success",
+            "products": results,
+            "total": len(results),
+            "filter_options": {
+                "categories": categories,
+                "sub_categories": sub_categories,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error in /api/forecast/products: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to load products: {str(e)}"}
 
 
 @router.get("/sku-explorer")
@@ -671,114 +670,110 @@ async def sku_explorer(
     Per-SKU forecast explorer: 12-week forecast with ±2σ confidence band,
     category context, historical demand, and stockout alert.
     """
-    sales_df = _load_sales_csv()
-    if sales_df is None:
-        return {"status": "error", "message": "No sales data found"}
+    try:
+        sales_df = _load_sales_csv()
+        if sales_df is None:
+            return {"status": "error", "message": "No sales data found"}
 
-    products_df = load_products_data()
+        products_df = load_products_data()
 
-    # Get SKU-specific data
-    sku_sales = sales_df[sales_df["sku_id"] == sku_id].sort_values("sale_date")
-    if len(sku_sales) < 4:
-        return {"status": "error", "message": f"Insufficient data for {sku_id} (need >= 4 weeks)"}
+        sku_sales = sales_df[sales_df["sku_id"] == sku_id].sort_values("sale_date")
+        if len(sku_sales) < 4:
+            return {"status": "error", "message": f"Insufficient data for {sku_id} (need >= 4 weeks)"}
 
-    # Product context
-    product_info = {}
-    if products_df is not None and len(products_df) > 0:
-        prod_row = products_df[products_df["SKU_ID"] == sku_id]
-        if len(prod_row) > 0:
-            product_info = {
-                "category": str(prod_row.iloc[0].get("Category", "Unknown") or "Unknown"),
-                "sub_category": str(prod_row.iloc[0].get("Sub_Category", "") or ""),
-                "shelf_life_days": int(float(prod_row.iloc[0].get("Shelf_Life_Days", 0) or 0) if not pd.isna(prod_row.iloc[0].get("Shelf_Life_Days")) else 0),
+        product_info = {}
+        if products_df is not None and len(products_df) > 0:
+            prod_row = products_df[products_df["SKU_ID"] == sku_id]
+            if len(prod_row) > 0:
+                product_info = {
+                    "category": str(prod_row.iloc[0].get("Category", "Unknown") or "Unknown"),
+                    "sub_category": str(prod_row.iloc[0].get("Sub_Category", "") or ""),
+                    "shelf_life_days": int(float(prod_row.iloc[0].get("Shelf_Life_Days", 0) or 0) if not pd.isna(prod_row.iloc[0].get("Shelf_Life_Days")) else 0),
+                }
+
+        today_ts = pd.Timestamp(date.today())
+        hist_start = today_ts - pd.Timedelta(weeks=26)
+        history = sku_sales[sku_sales["sale_date"] >= hist_start].copy()
+        history["week"] = history["sale_date"].dt.isocalendar().week.astype(int)
+        history["year_week"] = history["sale_date"].dt.strftime("%Y-W%U")
+
+        weekly_history = history.groupby("year_week").agg(
+            date=("sale_date", "last"),
+            units_sold=("units_sold", "sum"),
+        ).reset_index().sort_values("date")
+
+        today_ts = pd.Timestamp(date.today())
+        recent_13w = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]
+        avg_weekly = recent_13w["units_sold"].mean()
+        std_weekly = recent_13w["units_sold"].std()
+        if pd.isna(avg_weekly):
+            avg_weekly = 0
+        if pd.isna(std_weekly):
+            std_weekly = 0
+
+        cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+        cutoff_8w = today_ts - pd.Timedelta(weeks=8)
+        recent_4w_total = sku_sales[sku_sales["sale_date"] >= cutoff_4w]["units_sold"].sum()
+        prev_4w_total = sku_sales[(sku_sales["sale_date"] >= cutoff_8w) & (sku_sales["sale_date"] < cutoff_4w)]["units_sold"].sum()
+        trend_ratio = recent_4w_total / prev_4w_total if prev_4w_total > 0 else 1.0
+
+        forecast_weekly = avg_weekly * trend_ratio
+
+        forecast_dates = []
+        forecast_values = []
+        forecast_upper = []
+        forecast_lower = []
+        cv = (std_weekly / avg_weekly) if avg_weekly > 0 else 0
+        for w in range(1, horizon_weeks + 1):
+            week_date = today_ts + pd.Timedelta(weeks=w)
+            forecast_dates.append(week_date.strftime("%Y-%m-%d"))
+            forecast_values.append(round(float(forecast_weekly), 1))
+            base_sigma = std_weekly if std_weekly and std_weekly > 0 else avg_weekly * 0.3
+            variance_scale = 1.0 + cv * 2.5
+            z = 1.96 * np.sqrt(w / 4) * variance_scale
+            forecast_upper.append(round(float(forecast_weekly + z * base_sigma), 1))
+            forecast_lower.append(max(0, round(float(forecast_weekly - z * base_sigma), 1)))
+
+        estimated_stock = round(avg_weekly * 8)
+        coverage_weeks = round(estimated_stock / forecast_weekly, 1) if forecast_weekly > 0 else 99
+
+        stockout_alert = None
+        severity = get_stockout_severity(coverage_weeks)
+        if severity:
+            stockout_alert = {
+                "severity": severity,
+                "message": f"Estimated stock covers only {coverage_weeks} weeks at forecasted demand ({round(forecast_weekly)}/wk). Recommend immediate reorder.",
+                "weeks_until_stockout": coverage_weeks,
             }
 
-    # Historical data (last 26 weeks)
-    today_ts = pd.Timestamp(date.today())
-    hist_start = today_ts - pd.Timedelta(weeks=26)
-    history = sku_sales[sku_sales["sale_date"] >= hist_start].copy()
-    history["week"] = history["sale_date"].dt.isocalendar().week.astype(int)
-    history["year_week"] = history["sale_date"].dt.strftime("%Y-W%U")
-
-    weekly_history = history.groupby("year_week").agg(
-        date=("sale_date", "last"),
-        units_sold=("units_sold", "sum"),
-    ).reset_index().sort_values("date")
-
-    # Compute forecast using EWMA trend
-    today_ts = pd.Timestamp(date.today())
-    recent_13w = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]
-    avg_weekly = recent_13w["units_sold"].mean()
-    std_weekly = recent_13w["units_sold"].std()
-    if pd.isna(avg_weekly):
-        avg_weekly = 0
-    if pd.isna(std_weekly):
-        std_weekly = 0
-
-    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
-    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
-    recent_4w_total = sku_sales[sku_sales["sale_date"] >= cutoff_4w]["units_sold"].sum()
-    prev_4w_total = sku_sales[(sku_sales["sale_date"] >= cutoff_8w) & (sku_sales["sale_date"] < cutoff_4w)]["units_sold"].sum()
-    trend_ratio = recent_4w_total / prev_4w_total if prev_4w_total > 0 else 1.0
-
-    forecast_weekly = avg_weekly * trend_ratio
-
-    # Generate 12-week forecast with confidence bands
-    forecast_dates = []
-    forecast_values = []
-    forecast_upper = []
-    forecast_lower = []
-    cv = (std_weekly / avg_weekly) if avg_weekly > 0 else 0
-    for w in range(1, horizon_weeks + 1):
-        week_date = today_ts + pd.Timedelta(weeks=w)
-        forecast_dates.append(week_date.strftime("%Y-%m-%d"))
-        forecast_values.append(round(float(forecast_weekly), 1))
-        # ±2σ expanding band — widen more for volatile SKUs
-        base_sigma = std_weekly if std_weekly and std_weekly > 0 else avg_weekly * 0.3
-        variance_scale = 1.0 + cv * 2.5  # CV=0.2→1.5x, CV=0.4→2.0x, CV=0.6→2.5x
-        z = 1.96 * np.sqrt(w / 4) * variance_scale
-        forecast_upper.append(round(float(forecast_weekly + z * base_sigma), 1))
-        forecast_lower.append(max(0, round(float(forecast_weekly - z * base_sigma), 1)))
-
-    # Estimate stock & coverage
-    estimated_stock = round(avg_weekly * 8)
-    coverage_weeks = round(estimated_stock / forecast_weekly, 1) if forecast_weekly > 0 else 99
-
-    # Stockout alert
-    stockout_alert = None
-    severity = get_stockout_severity(coverage_weeks)
-    if severity:
-        stockout_alert = {
-            "severity": severity,
-            "message": f"Estimated stock covers only {coverage_weeks} weeks at forecasted demand ({round(forecast_weekly)}/wk). Recommend immediate reorder.",
-            "weeks_until_stockout": coverage_weeks,
+        return {
+            "status": "success",
+            "sku_id": sku_id,
+            "product": product_info,
+            "history": {
+                "dates": weekly_history["date"].dt.strftime("%Y-%m-%d").tolist(),
+                "values": weekly_history["units_sold"].tolist(),
+            },
+            "forecast": {
+                "dates": forecast_dates,
+                "values": forecast_values,
+                "upper_bound": forecast_upper,
+                "lower_bound": forecast_lower,
+            },
+            "stats": {
+                "avg_weekly_demand": round(float(avg_weekly), 1),
+                "std_weekly": round(float(std_weekly or 0), 1),
+                "cv": round(float(cv), 3),
+                "trend_pct": round(float((trend_ratio - 1) * 100), 1),
+                "estimated_stock": estimated_stock,
+                "coverage_weeks": coverage_weeks,
+                "total_12w_forecast": round(float(forecast_weekly * horizon_weeks)),
+            },
+            "stockout_alert": stockout_alert,
         }
-
-    return {
-        "status": "success",
-        "sku_id": sku_id,
-        "product": product_info,
-        "history": {
-            "dates": weekly_history["date"].dt.strftime("%Y-%m-%d").tolist(),
-            "values": weekly_history["units_sold"].tolist(),
-        },
-        "forecast": {
-            "dates": forecast_dates,
-            "values": forecast_values,
-            "upper_bound": forecast_upper,
-            "lower_bound": forecast_lower,
-        },
-        "stats": {
-            "avg_weekly_demand": round(float(avg_weekly), 1),
-            "std_weekly": round(float(std_weekly or 0), 1),
-            "cv": round(float(cv), 3),
-            "trend_pct": round(float((trend_ratio - 1) * 100), 1),
-            "estimated_stock": estimated_stock,
-            "coverage_weeks": coverage_weeks,
-            "total_12w_forecast": round(float(forecast_weekly * horizon_weeks)),
-        },
-        "stockout_alert": stockout_alert,
-    }
+    except Exception as e:
+        logger.error(f"SKU explorer failed for {sku_id}: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to load SKU explorer: {str(e)}"}
 
 
 @router.get("/yearly-demand")
@@ -791,30 +786,52 @@ async def yearly_demand(
     Yearly demand for a SKU, with optional date range filter.
     Returns monthly aggregated sales for the current year (or custom range).
     """
-    sales_df = _load_sales_csv()
-    if sales_df is None:
-        return {"status": "error", "message": "No sales data found"}
+    try:
+        sales_df = _load_sales_csv()
+        if sales_df is None:
+            return {"status": "error", "message": "No sales data found"}
 
-    sku_sales = sales_df[sales_df["sku_id"] == sku_id].copy()
-    if len(sku_sales) == 0:
-        return {"status": "error", "message": f"No sales data for {sku_id}"}
+        sku_sales = sales_df[sales_df["sku_id"] == sku_id].copy()
+        if len(sku_sales) == 0:
+            return {"status": "error", "message": f"No sales data for {sku_id}"}
 
-    sku_sales["sale_date"] = pd.to_datetime(sku_sales["sale_date"])
-    min_date = sku_sales["sale_date"].min().strftime("%Y-%m-%d")
-    max_date = sku_sales["sale_date"].max().strftime("%Y-%m-%d")
+        sku_sales["sale_date"] = pd.to_datetime(sku_sales["sale_date"])
+        min_date = sku_sales["sale_date"].min().strftime("%Y-%m-%d")
+        max_date = sku_sales["sale_date"].max().strftime("%Y-%m-%d")
 
-    if start_date and end_date:
-        start = pd.Timestamp(start_date)
-        end = pd.Timestamp(end_date)
-    else:
-        today = date.today()
-        start = pd.Timestamp(f"{today.year}-01-01")
-        end = pd.Timestamp(f"{today.year}-12-31")
+        if start_date and end_date:
+            start = pd.Timestamp(start_date)
+            end = pd.Timestamp(end_date)
+        else:
+            today = date.today()
+            start = pd.Timestamp(f"{today.year}-01-01")
+            end = pd.Timestamp(f"{today.year}-12-31")
 
-    mask = (sku_sales["sale_date"] >= start) & (sku_sales["sale_date"] <= end)
-    filtered = sku_sales[mask].copy()
+        mask = (sku_sales["sale_date"] >= start) & (sku_sales["sale_date"] <= end)
+        filtered = sku_sales[mask].copy()
 
-    if len(filtered) == 0:
+        if len(filtered) == 0:
+            return {
+                "status": "success",
+                "sku_id": sku_id,
+                "min_date": min_date,
+                "max_date": max_date,
+                "start_date": start.strftime("%Y-%m-%d"),
+                "end_date": end.strftime("%Y-%m-%d"),
+                "total_units": 0,
+                "months": [],
+            }
+
+        filtered["month"] = filtered["sale_date"].dt.to_period("M")
+        monthly = filtered.groupby("month").agg(
+            units_sold=("units_sold", "sum"),
+            orders=("units_sold", "count"),
+        ).reset_index()
+        monthly["month_str"] = monthly["month"].dt.strftime("%Y-%m")
+        monthly["avg_order_size"] = (monthly["units_sold"] / monthly["orders"]).round(1)
+
+        total_units = int(filtered["units_sold"].sum())
+
         return {
             "status": "success",
             "sku_id": sku_id,
@@ -822,38 +839,20 @@ async def yearly_demand(
             "max_date": max_date,
             "start_date": start.strftime("%Y-%m-%d"),
             "end_date": end.strftime("%Y-%m-%d"),
-            "total_units": 0,
-            "months": [],
+            "total_units": total_units,
+            "months": [
+                {
+                    "month": row["month_str"],
+                    "units_sold": int(row["units_sold"]),
+                    "orders": int(row["orders"]),
+                    "avg_order_size": float(row["avg_order_size"]),
+                }
+                for _, row in monthly.iterrows()
+            ],
         }
-
-    filtered["month"] = filtered["sale_date"].dt.to_period("M")
-    monthly = filtered.groupby("month").agg(
-        units_sold=("units_sold", "sum"),
-        orders=("units_sold", "count"),
-    ).reset_index()
-    monthly["month_str"] = monthly["month"].dt.strftime("%Y-%m")
-    monthly["avg_order_size"] = (monthly["units_sold"] / monthly["orders"]).round(1)
-
-    total_units = int(filtered["units_sold"].sum())
-
-    return {
-        "status": "success",
-        "sku_id": sku_id,
-        "min_date": min_date,
-        "max_date": max_date,
-        "start_date": start.strftime("%Y-%m-%d"),
-        "end_date": end.strftime("%Y-%m-%d"),
-        "total_units": total_units,
-        "months": [
-            {
-                "month": row["month_str"],
-                "units_sold": int(row["units_sold"]),
-                "orders": int(row["orders"]),
-                "avg_order_size": float(row["avg_order_size"]),
-            }
-            for _, row in monthly.iterrows()
-        ],
-    }
+    except Exception as e:
+        logger.error(f"Yearly demand failed for {sku_id}: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to load yearly demand: {str(e)}"}
 
 
 @router.get("/reorder-recommendations")
@@ -862,136 +861,126 @@ async def reorder_recommendations(db: Session = Depends(get_db)):
     Generate reorder recommendations: which SKUs to order, how much, and by when.
     Combines demand forecast, real inventory stock, and supplier lead times.
     """
-    sales_df = _load_sales_csv()
-    products_df = load_products_data()
-
-    if sales_df is None:
-        return {"status": "error", "message": "No sales data"}
-
-    # Load suppliers from DB
-    from app.models import Supplier as SupplierModel
-    suppliers_df = None
     try:
-        supplier_rows = db.query(
-            SupplierModel.primary_category,
-            SupplierModel.base_lead_time_days,
-            SupplierModel.moq,
-            SupplierModel.unit_cost_inr,
+        sales_df = _load_sales_csv()
+        products_df = load_products_data()
+
+        if sales_df is None:
+            return {"status": "error", "message": "No sales data"}
+
+        from app.models import Supplier as SupplierModel
+        suppliers_df = None
+        try:
+            supplier_rows = db.query(
+                SupplierModel.primary_category,
+                SupplierModel.base_lead_time_days,
+                SupplierModel.moq,
+                SupplierModel.unit_cost_inr,
+            ).all()
+            if supplier_rows:
+                suppliers_df = pd.DataFrame(supplier_rows, columns=["primary_category", "lead_time_days", "moq", "unit_cost_inr"])
+        except Exception as e:
+            logger.warning(f"Failed to load suppliers from DB: {e}")
+
+        inventory_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).all()
+        stock_map = {row.sku_id: row.quantity_on_hand for row in inventory_rows}
+
+        sku_cost_rows = db.query(Product.sku_id, Product.unit_cost_inr).filter(
+            Product.unit_cost_inr.isnot(None)
         ).all()
-        if supplier_rows:
-            suppliers_df = pd.DataFrame(supplier_rows, columns=["primary_category", "lead_time_days", "moq", "unit_cost_inr"])
+        sku_cost_map = {row.sku_id: row.unit_cost_inr for row in sku_cost_rows}
+
+        today_ts = pd.Timestamp(date.today())
+        cutoff_13w = today_ts - pd.Timedelta(weeks=13)
+        recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
+
+        sku_stats = recent.groupby("sku_id").agg(
+            avg_weekly=("units_sold", "mean"),
+            std_weekly=("units_sold", "std"),
+        ).reset_index()
+        sku_stats["std_weekly"] = sku_stats["std_weekly"].fillna(0)
+
+        if products_df is not None and len(products_df) > 0:
+            sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category"]].drop_duplicates("SKU_ID"),
+                                         left_on="sku_id", right_on="SKU_ID", how="left")
+            sku_stats.rename(columns={"Category": "category"}, inplace=True)
+        else:
+            sku_stats["category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
+        sku_stats["category"] = sku_stats["category"].fillna("Unknown")
+
+        cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+        cutoff_8w = today_ts - pd.Timedelta(weeks=8)
+        recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
+        prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
+        sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
+        sku_stats["prev_4w"] = sku_stats["sku_id"].map(prev_4w).fillna(0)
+        sku_stats["trend_ratio"] = np.where(sku_stats["prev_4w"] > 0, sku_stats["recent_4w"] / sku_stats["prev_4w"], 1.0)
+
+        sku_stats["forecast_weekly"] = sku_stats["avg_weekly"] * sku_stats["trend_ratio"]
+
+        sku_stats["estimated_stock"] = sku_stats["sku_id"].map(stock_map).fillna(0).astype(int)
+
+        sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99)
+
+        needs_reorder = sku_stats[sku_stats["coverage_weeks"] < 8].copy()
+
+        if suppliers_df is not None and len(suppliers_df) > 0:
+            cat_lead_time = suppliers_df.groupby("primary_category")["lead_time_days"].mean().to_dict()
+            cat_moq = suppliers_df.groupby("primary_category")["moq"].max().to_dict()
+            cat_cost = suppliers_df.groupby("primary_category")["unit_cost_inr"].mean().to_dict()
+        else:
+            cat_lead_time = {}
+            cat_moq = {}
+            cat_cost = {}
+
+        recommendations = []
+        today = date.today()
+        for _, row in needs_reorder.sort_values("coverage_weeks").iterrows():
+            sku = row["sku_id"]
+            cat = row.get("category", "Unknown")
+            if pd.isna(cat):
+                cat = "Unknown"
+            lead_days = int(cat_lead_time.get(cat, 0) or 0)
+            moq = int(cat_moq.get(cat, 1))
+            unit_cost = float(sku_cost_map.get(sku, cat_cost.get(cat, 0)))
+
+            weeks_to_stockout = row["coverage_weeks"]
+            days_to_stockout = weeks_to_stockout * 7
+
+            order_by = today + timedelta(days=max(0, int(days_to_stockout - lead_days - 7)))
+
+            qty_needed = max(0, round(row["forecast_weekly"] * 12 - row["estimated_stock"]))
+            qty_recommended = max(moq, qty_needed)
+            if qty_recommended > moq:
+                qty_recommended = ((qty_recommended + moq - 1) // moq) * moq
+
+            estimated_cost = qty_recommended * unit_cost
+
+            recommendations.append({
+                "sku_id": row["sku_id"],
+                "category": cat,
+                "avg_weekly_demand": round(float(row["avg_weekly"]), 1),
+                "forecast_weekly": round(float(row["forecast_weekly"]), 1),
+                "estimated_stock": int(row["estimated_stock"]),
+                "coverage_weeks": round(float(row["coverage_weeks"]), 1),
+                "lead_time_days": lead_days,
+                "order_by_date": order_by.strftime("%Y-%m-%d"),
+                "order_by_days_from_now": max(0, int((order_by - today).days)),
+                "qty_recommended": qty_recommended,
+                "moq": moq,
+                "estimated_cost_inr": round(estimated_cost),
+                "urgency": get_risk_level(weeks_to_stockout),
+            })
+
+        return {
+            "status": "success",
+            "total_recommendations": len(recommendations),
+            "total_estimated_cost_inr": sum(r["estimated_cost_inr"] for r in recommendations),
+            "recommendations": recommendations,
+        }
     except Exception as e:
-        logger.warning(f"Failed to load suppliers from DB: {e}")
-
-    # ── Load real inventory from DB ──
-    inventory_rows = db.query(Inventory.sku_id, Inventory.quantity_on_hand).all()
-    stock_map = {row.sku_id: row.quantity_on_hand for row in inventory_rows}
-
-    # ── Load per-SKU costs from products table ──
-    sku_cost_rows = db.query(Product.sku_id, Product.unit_cost_inr).filter(
-        Product.unit_cost_inr.isnot(None)
-    ).all()
-    sku_cost_map = {row.sku_id: row.unit_cost_inr for row in sku_cost_rows}
-
-    today_ts = pd.Timestamp(date.today())
-    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
-    recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
-
-    sku_stats = recent.groupby("sku_id").agg(
-        avg_weekly=("units_sold", "mean"),
-        std_weekly=("units_sold", "std"),
-    ).reset_index()
-    sku_stats["std_weekly"] = sku_stats["std_weekly"].fillna(0)
-
-    # Merge category
-    if products_df is not None and len(products_df) > 0:
-        sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category"]].drop_duplicates("SKU_ID"),
-                                     left_on="sku_id", right_on="SKU_ID", how="left")
-        sku_stats.rename(columns={"Category": "category"}, inplace=True)
-    else:
-        sku_stats["category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
-    sku_stats["category"] = sku_stats["category"].fillna("Unknown")
-
-    # Trend
-    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
-    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
-    recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
-    prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
-    sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
-    sku_stats["prev_4w"] = sku_stats["sku_id"].map(prev_4w).fillna(0)
-    sku_stats["trend_ratio"] = np.where(sku_stats["prev_4w"] > 0, sku_stats["recent_4w"] / sku_stats["prev_4w"], 1.0)
-
-    # Forecast weekly demand
-    sku_stats["forecast_weekly"] = sku_stats["avg_weekly"] * sku_stats["trend_ratio"]
-
-    # ── Use real inventory stock from DB ──
-    sku_stats["estimated_stock"] = sku_stats["sku_id"].map(stock_map).fillna(0).astype(int)
-
-    sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99)
-
-    # Only SKUs needing reorder (coverage < 8 weeks)
-    needs_reorder = sku_stats[sku_stats["coverage_weeks"] < 8].copy()
-
-    # Get supplier lead time per category
-    if suppliers_df is not None and len(suppliers_df) > 0:
-        cat_lead_time = suppliers_df.groupby("primary_category")["lead_time_days"].mean().to_dict()
-        cat_moq = suppliers_df.groupby("primary_category")["moq"].max().to_dict()
-        cat_cost = suppliers_df.groupby("primary_category")["unit_cost_inr"].mean().to_dict()
-    else:
-        cat_lead_time = {}
-        cat_moq = {}
-        cat_cost = {}
-
-    recommendations = []
-    today = date.today()
-    for _, row in needs_reorder.sort_values("coverage_weeks").iterrows():
-        sku = row["sku_id"]
-        cat = row.get("category", "Unknown")
-        if pd.isna(cat):
-            cat = "Unknown"
-        lead_days = int(cat_lead_time.get(cat, 0) or 0)
-        moq = int(cat_moq.get(cat, 1))
-        # Use per-SKU cost from products table, fallback to supplier category average
-        unit_cost = float(sku_cost_map.get(sku, cat_cost.get(cat, 0)))
-
-        # Weeks until stockout
-        weeks_to_stockout = row["coverage_weeks"]
-        days_to_stockout = weeks_to_stockout * 7
-
-        # Order deadline = stockout date - lead time - 7 day buffer
-        order_by = today + timedelta(days=max(0, int(days_to_stockout - lead_days - 7)))
-
-        # Recommended qty = 12-week forecast - estimated stock, at least MOQ
-        qty_needed = max(0, round(row["forecast_weekly"] * 12 - row["estimated_stock"]))
-        qty_recommended = max(moq, qty_needed)
-        # Round up to nearest MOQ
-        if qty_recommended > moq:
-            qty_recommended = ((qty_recommended + moq - 1) // moq) * moq
-
-        estimated_cost = qty_recommended * unit_cost
-
-        recommendations.append({
-            "sku_id": row["sku_id"],
-            "category": cat,
-            "avg_weekly_demand": round(float(row["avg_weekly"]), 1),
-            "forecast_weekly": round(float(row["forecast_weekly"]), 1),
-            "estimated_stock": int(row["estimated_stock"]),
-            "coverage_weeks": round(float(row["coverage_weeks"]), 1),
-            "lead_time_days": lead_days,
-            "order_by_date": order_by.strftime("%Y-%m-%d"),
-            "order_by_days_from_now": max(0, int((order_by - today).days)),
-            "qty_recommended": qty_recommended,
-            "moq": moq,
-            "estimated_cost_inr": round(estimated_cost),
-            "urgency": get_risk_level(weeks_to_stockout),
-        })
-
-    return {
-        "status": "success",
-        "total_recommendations": len(recommendations),
-        "total_estimated_cost_inr": sum(r["estimated_cost_inr"] for r in recommendations),
-        "recommendations": recommendations,
-    }
+        logger.error(f"Reorder recommendations failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to generate reorder recommendations: {str(e)}"}
 
 
 @router.get("/drift-monitor")
@@ -1001,90 +990,85 @@ async def drift_monitor(weeks: int = Query(12, ge=4, le=26)):
     Compares recent actual sales against what the model predicted,
     recomputes MAPE per week, and shows forecast degradation.
     """
-    sales_df = _load_sales_csv()
-    if sales_df is None:
-        return {"status": "error", "message": "No sales data"}
+    try:
+        sales_df = _load_sales_csv()
+        if sales_df is None:
+            return {"status": "error", "message": "No sales data"}
 
-    today_ts = pd.Timestamp(date.today())
-    # Use last `weeks` weeks for drift analysis
-    cutoff = today_ts - pd.Timedelta(weeks=weeks)
-    recent = sales_df[sales_df["sale_date"] >= cutoff].copy()
+        today_ts = pd.Timestamp(date.today())
+        cutoff = today_ts - pd.Timedelta(weeks=weeks)
+        recent = sales_df[sales_df["sale_date"] >= cutoff].copy()
 
-    # Per-week actuals
-    weekly_actual = recent.groupby(recent["sale_date"].dt.isocalendar().week.astype(int))["units_sold"].sum()
+        weekly_actual = recent.groupby(recent["sale_date"].dt.isocalendar().week.astype(int))["units_sold"].sum()
 
-    # Forecast: use EWMA trend on each week's actuals (simulated forecast based on prior data)
-    # For each week, the "forecast" is the average of all prior weeks
-    drift_data = []
-    cumulative_actual = []
-    cumulative_forecast = []
-    running_actual = 0
-    running_forecast = 0
+        drift_data = []
+        cumulative_actual = []
+        cumulative_forecast = []
+        running_actual = 0
+        running_forecast = 0
 
-    for week_num in sorted(weekly_actual.index):
-        actual = int(weekly_actual[week_num])
-        # Forecast = avg of all prior weeks (simulated ensemble forecast)
-        if len(cumulative_actual) > 0:
-            forecast = round(np.mean(cumulative_actual), 1)
+        for week_num in sorted(weekly_actual.index):
+            actual = int(weekly_actual[week_num])
+            if len(cumulative_actual) > 0:
+                forecast = round(np.mean(cumulative_actual), 1)
+            else:
+                forecast = actual
+
+            error_pct = round(abs(actual - forecast) / max(actual, 1) * 100, 1)
+            bias = round(((forecast - actual) / max(actual, 1)) * 100, 1)
+
+            running_actual += actual
+            running_forecast += forecast
+
+            week_start = cutoff + pd.Timedelta(weeks=week_num - sorted(weekly_actual.index)[0])
+
+            drift_data.append({
+                "week": week_start.strftime("%Y-%m-%d"),
+                "week_number": week_num,
+                "actual": actual,
+                "forecast": forecast,
+                "error_pct": error_pct,
+                "bias": bias,
+                "overstocked": bool(bias > 10),
+                "understocked": bool(bias < -10),
+            })
+
+            cumulative_actual.append(actual)
+            cumulative_forecast.append(forecast)
+
+        if len(drift_data) > 1:
+            errors = [d["error_pct"] for d in drift_data]
+            biases = [d["bias"] for d in drift_data]
+            overall_mape = round(np.mean(errors), 1)
+            overall_bias = round(np.mean(biases), 1)
+            trend = "improving" if len(errors) >= 3 and np.mean(errors[-3:]) < np.mean(errors[:3]) else "stable"
         else:
-            forecast = actual  # first week: forecast = actual (baseline)
+            overall_mape = 0
+            overall_bias = 0
+            trend = "insufficient_data"
 
-        error_pct = round(abs(actual - forecast) / max(actual, 1) * 100, 1)
-        bias = round(((forecast - actual) / max(actual, 1)) * 100, 1)
+        sku_drift = recent.groupby("sku_id").agg(
+            actual_total=("units_sold", "sum"),
+            weeks_active=("sale_date", "nunique"),
+        ).reset_index()
+        sku_drift = sku_drift[sku_drift["weeks_active"] >= 3]
 
-        running_actual += actual
-        running_forecast += forecast
+        sku_drift["forecast_total"] = sku_drift["actual_total"] * 0.95
+        sku_drift["mape"] = abs(sku_drift["actual_total"] - sku_drift["forecast_total"]) / sku_drift["actual_total"].clip(lower=1) * 100
+        sku_drift = sku_drift.sort_values("mape", ascending=False).head(10)
 
-        # Get the date for this week
-        week_start = cutoff + pd.Timedelta(weeks=week_num - sorted(weekly_actual.index)[0])
-
-        drift_data.append({
-            "week": week_start.strftime("%Y-%m-%d"),
-            "week_number": week_num,
-            "actual": actual,
-            "forecast": forecast,
-            "error_pct": error_pct,
-            "bias": bias,
-            "overstocked": bool(bias > 10),
-            "understocked": bool(bias < -10),
-        })
-
-        cumulative_actual.append(actual)
-        cumulative_forecast.append(forecast)
-
-    # Overall metrics
-    if len(drift_data) > 1:
-        errors = [d["error_pct"] for d in drift_data]
-        biases = [d["bias"] for d in drift_data]
-        overall_mape = round(np.mean(errors), 1)
-        overall_bias = round(np.mean(biases), 1)
-        trend = "improving" if len(errors) >= 3 and np.mean(errors[-3:]) < np.mean(errors[:3]) else "stable"
-    else:
-        overall_mape = 0
-        overall_bias = 0
-        trend = "insufficient_data"
-
-    # Per-SKU drift (top 10 worst)
-    sku_drift = recent.groupby("sku_id").agg(
-        actual_total=("units_sold", "sum"),
-        weeks_active=("sale_date", "nunique"),
-    ).reset_index()
-    sku_drift = sku_drift[sku_drift["weeks_active"] >= 3]
-
-    # Simulated forecast per SKU
-    sku_drift["forecast_total"] = sku_drift["actual_total"] * 0.95  # baseline 5% offset
-    sku_drift["mape"] = abs(sku_drift["actual_total"] - sku_drift["forecast_total"]) / sku_drift["actual_total"].clip(lower=1) * 100
-    sku_drift = sku_drift.sort_values("mape", ascending=False).head(10)
-
-    return {
-        "status": "success",
-        "overall_mape": overall_mape,
-        "overall_bias": overall_bias,
-        "trend": trend,
-        "weeks_analyzed": len(drift_data),
-        "drift_data": drift_data,
-        "top_skus_by_drift": sku_drift[["sku_id", "actual_total", "forecast_total", "mape"]].to_dict("records"),
-    }
+        return {
+            "status": "success",
+            "overall_mape": overall_mape,
+            "overall_bias": overall_bias,
+            "trend": trend,
+            "weeks_analyzed": len(drift_data),
+            "drift_data": drift_data,
+            "top_skus_by_drift": sku_drift[["sku_id", "actual_total", "forecast_total", "mape"]].to_dict("records"),
+        }
+    except Exception as e:
+        logger.error(f"Drift monitor failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to load drift monitor: {str(e)}"}
 
 
 @router.get("/export-csv")
@@ -1092,71 +1076,71 @@ async def export_forecast_csv(horizon_weeks: int = Query(12)):
     """
     Export full 200-SKU forecast table as CSV download.
     """
-    sales_df = _load_sales_csv()
-    products_df = load_products_data()
-    if sales_df is None:
-        return {"status": "error", "message": "No sales data"}
+    try:
+        sales_df = _load_sales_csv()
+        products_df = load_products_data()
+        if sales_df is None:
+            return {"status": "error", "message": "No sales data"}
 
-    today_ts = pd.Timestamp(date.today())
-    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
-    recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
+        today_ts = pd.Timestamp(date.today())
+        cutoff_13w = today_ts - pd.Timedelta(weeks=13)
+        recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
 
-    sku_stats = recent.groupby("sku_id").agg(
-        avg_weekly=("units_sold", "mean"),
-        std_weekly=("units_sold", "std"),
-    ).reset_index()
+        sku_stats = recent.groupby("sku_id").agg(
+            avg_weekly=("units_sold", "mean"),
+            std_weekly=("units_sold", "std"),
+        ).reset_index()
 
-    # Merge category
-    if products_df is not None and len(products_df) > 0:
-        sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category", "Sub_Category"]].drop_duplicates("SKU_ID"),
-                                     left_on="sku_id", right_on="SKU_ID", how="left")
-    else:
-        sku_stats["Category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
-        sku_stats["Sub_Category"] = ""
+        if products_df is not None and len(products_df) > 0:
+            sku_stats = sku_stats.merge(products_df[["SKU_ID", "Category", "Sub_Category"]].drop_duplicates("SKU_ID"),
+                                         left_on="sku_id", right_on="SKU_ID", how="left")
+        else:
+            sku_stats["Category"] = sku_stats["sku_id"].str[:2].map(SKU_CATEGORY_PREFIX).fillna("Unknown")
+            sku_stats["Sub_Category"] = ""
 
-    # Trend
-    cutoff_4w = today_ts - pd.Timedelta(weeks=4)
-    cutoff_8w = today_ts - pd.Timedelta(weeks=8)
-    recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
-    prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
-    sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
-    sku_stats["prev_4w"] = sku_stats["sku_id"].map(prev_4w).fillna(0)
-    sku_stats["trend_ratio"] = np.where(sku_stats["prev_4w"] > 0, sku_stats["recent_4w"] / sku_stats["prev_4w"], 1.0)
+        cutoff_4w = today_ts - pd.Timedelta(weeks=4)
+        cutoff_8w = today_ts - pd.Timedelta(weeks=8)
+        recent_4w = recent[recent["sale_date"] >= cutoff_4w].groupby("sku_id")["units_sold"].sum()
+        prev_4w = recent[(recent["sale_date"] >= cutoff_8w) & (recent["sale_date"] < cutoff_4w)].groupby("sku_id")["units_sold"].sum()
+        sku_stats["recent_4w"] = sku_stats["sku_id"].map(recent_4w).fillna(0)
+        sku_stats["prev_4w"] = sku_stats["sku_id"].map(prev_4w).fillna(0)
+        sku_stats["trend_ratio"] = np.where(sku_stats["prev_4w"] > 0, sku_stats["recent_4w"] / sku_stats["prev_4w"], 1.0)
 
-    sku_stats["forecast_weekly"] = (sku_stats["avg_weekly"] * sku_stats["trend_ratio"]).round(1)
-    sku_stats["forecast_12w"] = (sku_stats["forecast_weekly"] * horizon_weeks).round(0).astype(int)
-    sku_stats["estimated_stock"] = (sku_stats["avg_weekly"] * 8).round(0).astype(int)
-    sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99).round(1)
-    sku_stats["shortfall_weeks"] = np.maximum(horizon_weeks - sku_stats["coverage_weeks"], 0).round(1)
+        sku_stats["forecast_weekly"] = (sku_stats["avg_weekly"] * sku_stats["trend_ratio"]).round(1)
+        sku_stats["forecast_12w"] = (sku_stats["forecast_weekly"] * horizon_weeks).round(0).astype(int)
+        sku_stats["estimated_stock"] = (sku_stats["avg_weekly"] * 8).round(0).astype(int)
+        sku_stats["coverage_weeks"] = np.where(sku_stats["forecast_weekly"] > 0, sku_stats["estimated_stock"] / sku_stats["forecast_weekly"], 99).round(1)
+        sku_stats["shortfall_weeks"] = np.maximum(horizon_weeks - sku_stats["coverage_weeks"], 0).round(1)
 
-    def risk_level(cov, trend):
-        if cov < 4 or (cov < 6 and trend > 1.1): return "CRITICAL"
-        elif cov < 6: return "HIGH"
-        elif cov < 8: return "MEDIUM"
-        return "LOW"
+        def risk_level(cov, trend):
+            if cov < 4 or (cov < 6 and trend > 1.1): return "CRITICAL"
+            elif cov < 6: return "HIGH"
+            elif cov < 8: return "MEDIUM"
+            return "LOW"
 
-    sku_stats["risk_level"] = sku_stats.apply(lambda r: risk_level(r["coverage_weeks"], r["trend_ratio"]), axis=1)
+        sku_stats["risk_level"] = sku_stats.apply(lambda r: risk_level(r["coverage_weeks"], r["trend_ratio"]), axis=1)
 
-    # Build CSV DataFrame
-    export_df = sku_stats[["sku_id", "Category", "Sub_Category",
-                            "avg_weekly", "forecast_weekly", "trend_ratio", "estimated_stock",
-                            "coverage_weeks", "forecast_12w", "shortfall_weeks", "risk_level"]].copy()
-    export_df.columns = ["SKU_ID", "Category", "Sub_Category", "Avg_Weekly_Demand",
-                          "Forecast_Weekly", "Trend_Ratio", "Est_Stock", "Coverage_Weeks",
-                          f"Forecast_{horizon_weeks}w", "Shortfall_Weeks", "Risk_Level"]
-    export_df["Trend_Ratio"] = export_df["Trend_Ratio"].round(3)
-    export_df = export_df.sort_values(["Risk_Level", "Shortfall_Weeks"], ascending=[True, False])
+        export_df = sku_stats[["sku_id", "Category", "Sub_Category",
+                                "avg_weekly", "forecast_weekly", "trend_ratio", "estimated_stock",
+                                "coverage_weeks", "forecast_12w", "shortfall_weeks", "risk_level"]].copy()
+        export_df.columns = ["SKU_ID", "Category", "Sub_Category", "Avg_Weekly_Demand",
+                              "Forecast_Weekly", "Trend_Ratio", "Est_Stock", "Coverage_Weeks",
+                              f"Forecast_{horizon_weeks}w", "Shortfall_Weeks", "Risk_Level"]
+        export_df["Trend_Ratio"] = export_df["Trend_Ratio"].round(3)
+        export_df = export_df.sort_values(["Risk_Level", "Shortfall_Weeks"], ascending=[True, False])
 
-    # Convert to CSV string
-    csv_buffer = io.StringIO()
-    export_df.to_csv(csv_buffer, index=False)
-    csv_buffer.seek(0)
+        csv_buffer = io.StringIO()
+        export_df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
 
-    return StreamingResponse(
-        io.BytesIO(csv_buffer.getvalue().encode("utf-8")),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=forecast_export_{date.today()}.csv"},
-    )
+        return StreamingResponse(
+            io.BytesIO(csv_buffer.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=forecast_export_{date.today()}.csv"},
+        )
+    except Exception as e:
+        logger.error(f"CSV export failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to export CSV: {str(e)}"}
 
 
 @router.get("/calendar")
@@ -1168,77 +1152,80 @@ async def forecast_calendar(
     Forecast calendar: next N weeks of predicted demand per day/week,
     highlighting low-stock days.
     """
-    sales_df = _load_sales_csv()
-    if sales_df is None:
-        return {"status": "error", "message": "No sales data"}
+    try:
+        sales_df = _load_sales_csv()
+        if sales_df is None:
+            return {"status": "error", "message": "No sales data"}
 
-    today_ts = pd.Timestamp(date.today())
+        today_ts = pd.Timestamp(date.today())
 
-    if sku_id:
-        sku_sales = sales_df[sales_df["sku_id"] == sku_id].sort_values("sale_date")
-        if len(sku_sales) < 4:
-            return {"status": "error", "message": f"Insufficient data for {sku_id}"}
+        if sku_id:
+            sku_sales = sales_df[sales_df["sku_id"] == sku_id].sort_values("sale_date")
+            if len(sku_sales) < 4:
+                return {"status": "error", "message": f"Insufficient data for {sku_id}"}
 
-        avg_weekly = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]["units_sold"].mean()
-        std_weekly = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]["units_sold"].std()
-        estimated_stock = round(avg_weekly * 8)
-        forecast_weekly = avg_weekly
+            avg_weekly = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]["units_sold"].mean()
+            std_weekly = sku_sales[sku_sales["sale_date"] >= today_ts - pd.Timedelta(weeks=13)]["units_sold"].std()
+            estimated_stock = round(avg_weekly * 8)
+            forecast_weekly = avg_weekly
+
+            calendar = []
+            stock = estimated_stock
+            for w in range(weeks):
+                week_start = today_ts + pd.Timedelta(weeks=w + 1)
+                week_end = week_start + pd.Timedelta(days=6)
+                predicted = round(float(forecast_weekly))
+                stock_after = max(0, stock - predicted)
+                low_stock = stock_after < predicted * 0.5
+
+                calendar.append({
+                    "week_start": week_start.strftime("%Y-%m-%d"),
+                    "week_end": week_end.strftime("%Y-%m-%d"),
+                    "week_label": f"Week {w + 1}",
+                    "predicted_demand": predicted,
+                    "stock_start": stock,
+                    "stock_end": stock_after,
+                    "low_stock_day": low_stock,
+                    "status": "RED" if stock_after <= 0 else ("YELLOW" if low_stock else "GREEN"),
+                })
+                stock = stock_after
+
+            return {
+                "status": "success",
+                "sku_id": sku_id,
+                "avg_weekly_demand": round(float(avg_weekly), 1),
+                "estimated_stock": estimated_stock,
+                "calendar": calendar,
+            }
+
+        cutoff_13w = today_ts - pd.Timedelta(weeks=13)
+        recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
+        sku_avg = recent.groupby("sku_id")["units_sold"].mean()
+        total_weekly = sku_avg.sum()
 
         calendar = []
-        stock = estimated_stock
         for w in range(weeks):
             week_start = today_ts + pd.Timedelta(weeks=w + 1)
             week_end = week_start + pd.Timedelta(days=6)
-            predicted = round(float(forecast_weekly))
-            stock_after = max(0, stock - predicted)
-            low_stock = stock_after < predicted * 0.5
+            predicted_total = round(float(total_weekly))
 
             calendar.append({
                 "week_start": week_start.strftime("%Y-%m-%d"),
                 "week_end": week_end.strftime("%Y-%m-%d"),
                 "week_label": f"Week {w + 1}",
-                "predicted_demand": predicted,
-                "stock_start": stock,
-                "stock_end": stock_after,
-                "low_stock_day": low_stock,
-                "status": "RED" if stock_after <= 0 else ("YELLOW" if low_stock else "GREEN"),
+                "predicted_total_demand": predicted_total,
+                "total_skus": len(sku_avg),
             })
-            stock = stock_after
 
         return {
             "status": "success",
-            "sku_id": sku_id,
-            "avg_weekly_demand": round(float(avg_weekly), 1),
-            "estimated_stock": estimated_stock,
+            "sku_id": None,
+            "total_weekly_demand": round(float(total_weekly)),
             "calendar": calendar,
         }
-
-    # All SKUs summary calendar
-    cutoff_13w = today_ts - pd.Timedelta(weeks=13)
-    recent = sales_df[sales_df["sale_date"] >= cutoff_13w]
-    sku_avg = recent.groupby("sku_id")["units_sold"].mean()
-    total_weekly = sku_avg.sum()
-
-    calendar = []
-    for w in range(weeks):
-        week_start = today_ts + pd.Timedelta(weeks=w + 1)
-        week_end = week_start + pd.Timedelta(days=6)
-        predicted_total = round(float(total_weekly))
-
-        calendar.append({
-            "week_start": week_start.strftime("%Y-%m-%d"),
-            "week_end": week_end.strftime("%Y-%m-%d"),
-            "week_label": f"Week {w + 1}",
-            "predicted_total_demand": predicted_total,
-            "total_skus": len(sku_avg),
-        })
-
-    return {
-        "status": "success",
-        "sku_id": None,
-        "total_weekly_demand": round(float(total_weekly)),
-        "calendar": calendar,
-    }
+    except Exception as e:
+        logger.error(f"Forecast calendar failed: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to load forecast calendar: {str(e)}"}
 
 
 # ═══════════════════════════════════════════════════════════════════

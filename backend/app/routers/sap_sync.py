@@ -777,11 +777,27 @@ def sync_and_retrain(
 
 
 @router.get("/sync/status")
-def sync_status(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def sync_status(db: Session = Depends(get_db)):
     """Status payload consumed by the SapSync dashboard page."""
-    config = _get_config(db)
-    logs = db.query(SapSyncLog).order_by(SapSyncLog.started_at.desc()).limit(12).all()
-    mock = check_mock_erp_status()
+    try:
+        config = _get_config(db)
+    except Exception as e:
+        logger.warning(f"Failed to get SAP config: {e}")
+        db.rollback()
+        config = None
+
+    try:
+        logs = db.query(SapSyncLog).order_by(SapSyncLog.started_at.desc()).limit(12).all()
+    except Exception as e:
+        logger.warning(f"Failed to query SAP sync logs: {e}")
+        db.rollback()
+        logs = []
+
+    try:
+        mock = check_mock_erp_status()
+    except Exception as e:
+        logger.warning(f"Failed to check mock ERP status: {e}")
+        mock = {"connected": False}
 
     def _log_dto(l):
         return {
@@ -801,7 +817,7 @@ def sync_status(db: Session = Depends(get_db), current_user=Depends(get_current_
 
     return {
         "connected": bool(mock.get("connected")) or running,
-        "last_sync": config.last_sync_at.isoformat() if config.last_sync_at else None,
+        "last_sync": config.last_sync_at.isoformat() if config and config.last_sync_at else None,
         "latest_log": _log_dto(latest) if latest else None,
         "running": running,
         "recent_logs": [_log_dto(l) for l in logs],

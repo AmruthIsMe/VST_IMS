@@ -9,6 +9,9 @@ from app.models import Order, OrderItem, Product
 from app.schemas import OrderCreate, OrderUpdate, OrderResponse, OrderItemResponse, PaginatedResponse
 from app.routers.auth import get_current_user
 from app.services.sap_connector import SAP_MOCK_URL
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -23,32 +26,43 @@ def list_orders(
     order_type: str = "",
     db: Session = Depends(get_db),
 ):
-    query = db.query(Order).options(joinedload(Order.items))
+    try:
+        query = db.query(Order).options(joinedload(Order.items))
 
-    if search:
-        query = query.filter(
-            Order.order_id.ilike(f"%{search}%")
-            | Order.customer_name.ilike(f"%{search}%")
-            | Order.supplier_name.ilike(f"%{search}%")
-            | Order.sap_po_number.ilike(f"%{search}%")
+        if search:
+            query = query.filter(
+                Order.order_id.ilike(f"%{search}%")
+                | Order.customer_name.ilike(f"%{search}%")
+                | Order.supplier_name.ilike(f"%{search}%")
+                | Order.sap_po_number.ilike(f"%{search}%")
+            )
+        if payment_status:
+            query = query.filter(Order.payment_status == payment_status)
+        if order_status:
+            query = query.filter(Order.order_status == order_status)
+        if order_type:
+            query = query.filter(Order.order_type == order_type)
+
+        total = query.count()
+        items = query.order_by(Order.order_date.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+        return PaginatedResponse(
+            items=[OrderResponse.model_validate(i) for i in items],
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=(total + page_size - 1) // page_size,
         )
-    if payment_status:
-        query = query.filter(Order.payment_status == payment_status)
-    if order_status:
-        query = query.filter(Order.order_status == order_status)
-    if order_type:
-        query = query.filter(Order.order_type == order_type)
-
-    total = query.count()
-    items = query.order_by(Order.order_date.desc()).offset((page - 1) * page_size).limit(page_size).all()
-
-    return PaginatedResponse(
-        items=[OrderResponse.model_validate(i) for i in items],
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=(total + page_size - 1) // page_size,
-    )
+    except Exception as e:
+        logger.error(f"Failed to fetch orders: {e}", exc_info=True)
+        db.rollback()
+        return PaginatedResponse(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            total_pages=0,
+        )
 
 
 @router.get("/sap-orders")
@@ -61,68 +75,79 @@ def list_sap_orders(
     db: Session = Depends(get_db),
 ):
     """List SAP-synced orders (both Purchase Orders and Sales Orders) with line items."""
-    query = db.query(Order).options(joinedload(Order.items)).filter(
-        Order.sap_po_number.isnot(None)
-    )
-
-    if order_type:
-        query = query.filter(Order.order_type == order_type)
-    if order_status:
-        query = query.filter(Order.order_status == order_status)
-    if search:
-        query = query.filter(
-            Order.order_id.ilike(f"%{search}%")
-            | Order.customer_name.ilike(f"%{search}%")
-            | Order.supplier_name.ilike(f"%{search}%")
+    try:
+        query = db.query(Order).options(joinedload(Order.items)).filter(
+            Order.sap_po_number.isnot(None)
         )
 
-    total = query.count()
-    orders = query.order_by(Order.order_date.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        if order_type:
+            query = query.filter(Order.order_type == order_type)
+        if order_status:
+            query = query.filter(Order.order_status == order_status)
+        if search:
+            query = query.filter(
+                Order.order_id.ilike(f"%{search}%")
+                | Order.customer_name.ilike(f"%{search}%")
+                | Order.supplier_name.ilike(f"%{search}%")
+            )
 
-    results = []
-    for o in orders:
-        product_ids = [it.product_id for it in o.items]
-        products = {}
-        if product_ids:
-            for p in db.query(Product).filter(Product.id.in_(product_ids)).all():
-                products[str(p.id)] = {"sku_id": p.sku_id, "category": p.category}
+        total = query.count()
+        orders = query.order_by(Order.order_date.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-        items_with_sku = []
-        for it in o.items:
-            prod_info = products.get(str(it.product_id), {})
-            items_with_sku.append({
-                "id": str(it.id),
-                "sku_id": prod_info.get("sku_id", ""),
-                "category": prod_info.get("category", ""),
-                "quantity": it.quantity,
-                "unit_price_inr": it.unit_price_inr,
-                "total_price_inr": it.total_price_inr,
+        results = []
+        for o in orders:
+            product_ids = [it.product_id for it in o.items]
+            products = {}
+            if product_ids:
+                for p in db.query(Product).filter(Product.id.in_(product_ids)).all():
+                    products[str(p.id)] = {"sku_id": p.sku_id, "category": p.category}
+
+            items_with_sku = []
+            for it in o.items:
+                prod_info = products.get(str(it.product_id), {})
+                items_with_sku.append({
+                    "id": str(it.id),
+                    "sku_id": prod_info.get("sku_id", ""),
+                    "category": prod_info.get("category", ""),
+                    "quantity": it.quantity,
+                    "unit_price_inr": it.unit_price_inr,
+                    "total_price_inr": it.total_price_inr,
+                })
+
+            results.append({
+                "id": str(o.id),
+                "order_id": o.order_id,
+                "order_date": o.order_date.isoformat() if o.order_date else None,
+                "customer_name": o.customer_name,
+                "supplier_name": o.supplier_name,
+                "order_type": o.order_type,
+                "total_amount_inr": o.total_amount_inr,
+                "payment_status": o.payment_status,
+                "order_status": o.order_status,
+                "sap_po_number": o.sap_po_number,
+                "fulfillment_region": o.fulfillment_region,
+                "items": items_with_sku,
+                "item_count": len(items_with_sku),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
             })
 
-        results.append({
-            "id": str(o.id),
-            "order_id": o.order_id,
-            "order_date": o.order_date.isoformat() if o.order_date else None,
-            "customer_name": o.customer_name,
-            "supplier_name": o.supplier_name,
-            "order_type": o.order_type,
-            "total_amount_inr": o.total_amount_inr,
-            "payment_status": o.payment_status,
-            "order_status": o.order_status,
-            "sap_po_number": o.sap_po_number,
-            "fulfillment_region": o.fulfillment_region,
-            "items": items_with_sku,
-            "item_count": len(items_with_sku),
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-        })
-
-    return {
-        "items": results,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size,
-    }
+        return {
+            "items": results,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch SAP orders: {e}", exc_info=True)
+        db.rollback()
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": 0,
+        }
 
 
 @router.get("/stock-movements")

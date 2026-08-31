@@ -64,8 +64,8 @@ def list_products(
                 ).all()
                 for sku_id, qty in inv_rows:
                     stock_map[sku_id] = qty or 0
-        except Exception:
-            logger.warning("Failed to fetch stock map for products")
+        except Exception as e:
+            logger.warning(f"Failed to fetch stock map for products: {e}")
             db.rollback()
 
         response_items = []
@@ -94,8 +94,15 @@ def list_products(
             total_pages=(total + page_size - 1) // page_size if page_size else 1,
         )
     except Exception as e:
+        logger.error(f"Failed to fetch products: {e}", exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to fetch products")
+        return PaginatedResponse(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            total_pages=0,
+        )
 
 
 @router.get("/categories")

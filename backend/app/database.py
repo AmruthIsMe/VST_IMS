@@ -1,6 +1,9 @@
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.config import get_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -12,6 +15,8 @@ engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
     connect_args=connect_args,
+    pool_size=5,
+    max_overflow=10,
 )
 
 if settings.DATABASE_URL.startswith("sqlite"):
@@ -50,21 +55,33 @@ def run_light_migrations() -> list[str]:
     create_all only adds new tables, never new columns — this bridges the gap
     for both SQLite (build) and PostgreSQL (cloud)."""
     applied = []
-    with engine.connect() as conn:
-        for table, cols in LIGHT_MIGRATIONS.items():
-            try:
-                existing = {row[0] for row in conn.execute(text(
-                    f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}'"
-                ))}
-            except Exception:
-                existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
-            if not existing:
-                continue
-            for col, ddl in cols.items():
-                if col not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
-                    applied.append(f"{table}.{col}")
-        conn.commit()
+    is_postgres = settings.DATABASE_URL.startswith("postgresql")
+    try:
+        with engine.connect() as conn:
+            for table, cols in LIGHT_MIGRATIONS.items():
+                try:
+                    if is_postgres:
+                        result = conn.execute(text(
+                            f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}'"
+                        ))
+                        existing = {row[0] for row in result}
+                    else:
+                        result = conn.execute(text(f"PRAGMA table_info({table})"))
+                        existing = {row[1] for row in result}
+                except Exception:
+                    existing = set()
+                if not existing:
+                    continue
+                for col, ddl in cols.items():
+                    if col not in existing:
+                        try:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+                            applied.append(f"{table}.{col}")
+                        except Exception as e:
+                            logger.warning(f"Migration note for {table}.{col}: {e}")
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Light migrations failed: {e}")
     return applied
 
 
