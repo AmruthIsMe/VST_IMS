@@ -55,7 +55,7 @@ LIGHT_MIGRATIONS = {
     "inventory": {
         "unit_cost_inr": "DOUBLE PRECISION",
     },
-    "sap_config": {"last_sync_at": "DATETIME"},
+    "sap_config": {"last_sync_at": "TIMESTAMP"},
     "sales": {"created_at": "TIMESTAMP", "unit_cost_inr": "DOUBLE PRECISION"},
     "sap_sync_log": {"detail_json": "TEXT"},
     "orders": {"order_type": "VARCHAR(20) DEFAULT 'SALES_ORDER'",

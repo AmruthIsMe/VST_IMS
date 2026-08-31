@@ -165,6 +165,9 @@ def main():
 
     start_date = (max_date + timedelta(days=1)) if max_date else date(2026, 1, 1)
     start_monday = _week_monday(start_date)
+    # If start_monday == max_date, the first week already has data — skip to next Monday
+    if max_date and start_monday == _week_monday(max_date):
+        start_monday += timedelta(days=7)
     end_monday = _week_monday(today)
 
     print(f"\n  Generating sales data: {start_monday} -> {end_monday}")
@@ -175,8 +178,19 @@ def main():
     batch = []
 
     with engine.connect() as conn:
+        # Build set of dates that already have sales data
+        existing_dates = {
+            r[0] for r in conn.execute(
+                text("SELECT DISTINCT DATE(sale_date) FROM sales")
+            ).fetchall()
+        }
+
         week = start_monday
         while week <= end_monday:
+            if week in existing_dates:
+                print(f"    ... skipping {week} (already has data)")
+                week += timedelta(days=7)
+                continue
             for sku, prof in profiles.items():
                 pid = pid_by_sku.get(sku)
                 if not pid:
