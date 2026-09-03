@@ -274,7 +274,7 @@ def stockout_risk(weeks_ahead: int = 12, db: Session = Depends(get_db)):
     }
 
 
-def _load_sales_products():
+def _load_sales_products(since_date=None):
     """Shared helper: load sales + products from DB or CSV fallback."""
     from sqlalchemy import text
     from app.database import SessionLocal
@@ -284,10 +284,16 @@ def _load_sales_products():
     products_df = None
     try:
         try:
-            sales_query = text("""
-                SELECT sku_id, sale_date, units_sold FROM sales ORDER BY sale_date
-            """)
-            rows = db.execute(sales_query).fetchall()
+            if since_date:
+                sales_query = text("""
+                    SELECT sku_id, sale_date, units_sold FROM sales WHERE sale_date >= :sd ORDER BY sale_date
+                """)
+                rows = db.execute(sales_query, {"sd": since_date}).fetchall()
+            else:
+                sales_query = text("""
+                    SELECT sku_id, sale_date, units_sold FROM sales ORDER BY sale_date
+                """)
+                rows = db.execute(sales_query).fetchall()
             if rows:
                 sales_df = pd.DataFrame(rows, columns=["sku_id", "sale_date", "units_sold"])
                 sales_df["sale_date"] = pd.to_datetime(sales_df["sale_date"])
@@ -312,7 +318,8 @@ def category_forecast():
     Category-level forecast aggregation with trends.
     Shows total forecast demand per category for next 12 weeks, trend arrows, and contribution %.
     """
-    sales_df, products_df = _load_sales_products()
+    cutoff_14w = date.today() - timedelta(weeks=14)
+    sales_df, products_df = _load_sales_products(since_date=cutoff_14w)
     if sales_df is None or len(sales_df) == 0:
         return {"status": "error", "message": "No sales data"}
 
@@ -377,55 +384,61 @@ def demand_trend(months: int = None, start_date: str = None, end_date: str = Non
     months: number of months of data to show (0 = all). Calculated from data's max date.
     granularity: 'daily', 'weekly', 'monthly'
     """
-    sales_df, _ = _load_sales_products()
-    if sales_df is None or len(sales_df) == 0:
+    try:
+        query = db.query(Sale.sale_date, func.sum(Sale.units_sold)).group_by(Sale.sale_date).order_by(Sale.sale_date)
+        if start_date:
+            query = query.filter(Sale.sale_date >= pd.to_datetime(start_date).date())
+        if end_date:
+            query = query.filter(Sale.sale_date <= pd.to_datetime(end_date).date())
+        rows = query.all()
+    except Exception as e:
+        logger.error(f"Error querying sales for demand-trend: {e}")
+        db.rollback()
+        rows = []
+
+    if not rows:
         return {"labels": [], "values": [], "granularity": granularity}
 
-    max_date = sales_df["sale_date"].max()
-
+    # If months filter is active, filter by max_date - offset
     if months is not None and months > 0:
+        max_date = rows[-1][0]
+        if hasattr(max_date, "date"):
+            max_date = max_date.date()
         if months == 12:
-            cutoff = pd.Timestamp(f"{max_date.year}-01-01")
+            cutoff = date(max_date.year, 1, 1)
         else:
-            cutoff = max_date - pd.DateOffset(months=months)
-        sales_df = sales_df[sales_df["sale_date"] >= cutoff]
-    elif start_date:
-        sales_df = sales_df[sales_df["sale_date"] >= pd.to_datetime(start_date)]
+            cutoff = (pd.Timestamp(max_date) - pd.DateOffset(months=months)).date()
+        rows = [r for r in rows if (r[0].date() if hasattr(r[0], "date") else r[0]) >= cutoff]
 
-    if end_date:
-        ed = pd.to_datetime(end_date)
-        if ed > max_date:
-            ed = max_date
-        sales_df = sales_df[sales_df["sale_date"] <= ed]
-
-    if len(sales_df) == 0:
+    if not rows:
         return {"labels": [], "values": [], "granularity": granularity}
 
     if granularity == "daily":
-        grouped = sales_df.groupby(sales_df["sale_date"].dt.strftime("%Y-%m-%d"))["units_sold"].sum().reset_index()
-        grouped.columns = ["period", "value"]
+        labels = [r[0].strftime("%Y-%m-%d") if hasattr(r[0], "strftime") else str(r[0]) for r in rows]
+        values = [int(r[1] or 0) for r in rows]
     elif granularity == "monthly":
-        grouped = sales_df.groupby(sales_df["sale_date"].dt.strftime("%Y-%m"))["units_sold"].sum().reset_index()
-        grouped.columns = ["period", "value"]
+        monthly_map = {}
+        for d, u in rows:
+            m = d.strftime("%Y-%m") if hasattr(d, "strftime") else str(d)[:7]
+            monthly_map[m] = monthly_map.get(m, 0) + int(u or 0)
+        sorted_m = sorted(monthly_map.items())
+        labels = [k for k, _ in sorted_m]
+        values = [v for _, v in sorted_m]
     else:  # weekly (default)
-        week_starts = sales_df["sale_date"].dt.to_period("W").apply(lambda r: r.start_time)
-        grouped = sales_df.groupby(week_starts)["units_sold"].sum().reset_index()
-        grouped.columns = ["week_start", "value"]
-        grouped = grouped.sort_values("week_start")
+        weekly_map = {}
+        for d, u in rows:
+            dt = d.date() if hasattr(d, "date") else d
+            w = dt - timedelta(days=dt.weekday())
+            weekly_map[w] = weekly_map.get(w, 0) + int(u or 0)
+        sorted_w = sorted(weekly_map.items())
         if months is not None and 0 < months <= 6:
-            grouped["period"] = pd.to_datetime(grouped["week_start"]).dt.strftime("%b %d")
+            labels = [k.strftime("%b %d") for k, _ in sorted_w]
         else:
-            grouped["period"] = pd.to_datetime(grouped["week_start"]).dt.strftime("%Y-%m-%d")
-        return {
-            "labels": grouped["period"].tolist(),
-            "values": [int(v) for v in grouped["value"].tolist()],
-            "granularity": granularity,
-        }
-
-    grouped = grouped.sort_values("period")
+            labels = [k.strftime("%Y-%m-%d") for k, _ in sorted_w]
+        values = [v for _, v in sorted_w]
 
     return {
-        "labels": grouped["period"].tolist(),
-        "values": [int(v) for v in grouped["value"].tolist()],
+        "labels": labels,
+        "values": values,
         "granularity": granularity,
     }
