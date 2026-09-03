@@ -1,4 +1,4 @@
-# VST IMS Backend — Cloud Deployment (No ML Libraries)
+# VST IMS Backend — Cloud Deployment
 # Use this on Render/Railway. For local dev, use requirements.txt instead.
 
 fastapi>=0.115.0
@@ -17,6 +17,15 @@ python-dotenv>=1.0.0
 
 # PostgreSQL driver
 psycopg2-binary>=2.9.0
+
+# ML / Forecasting
+xgboost>=2.0.0
+lightgbm>=4.0.0
+statsmodels>=0.14.0
+prophet>=1.1.0
+scikit-learn>=1.5.0
+joblib>=1.4.0
+scipy>=1.14.0
 
 # LLM / Chatbot (Genie still works in cloud mode)
 google-generativeai>=0.8.0

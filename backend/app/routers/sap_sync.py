@@ -442,7 +442,7 @@ def _backfill_sales_to_today(db: Session) -> dict:
                         INSERT INTO sales (id, sale_date, product_id, sku_id, units_sold,
                                            fulfillment_region, stockout_flag, created_at)
                         VALUES (:id, :sale_date, :product_id, :sku_id, :units_sold,
-                                :region, 0, :created_at)
+                                :region, FALSE, :created_at)
                     """), {"id": _uuid(), "sale_date": week, "product_id": pid, "sku_id": sku,
                            "units_sold": qty, "region": SIM_REGION, "created_at": now})
                     inserted += 1
@@ -451,7 +451,7 @@ def _backfill_sales_to_today(db: Session) -> dict:
                     INSERT INTO sales (id, sale_date, product_id, sku_id, units_sold,
                                        fulfillment_region, stockout_flag, created_at)
                     VALUES (:id, :sale_date, :product_id, :sku_id, :units_sold,
-                            :region, 0, :created_at)
+                            :region, FALSE, :created_at)
                 """), {"id": _uuid(), "sale_date": week, "product_id": pid, "sku_id": sku,
                        "units_sold": full_qty, "region": SIM_REGION, "created_at": now})
                 inserted += 1
