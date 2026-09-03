@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from jose import jwt, JWTError, ExpiredSignatureError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from passlib.context import CryptContext
+import hashlib
+import uuid
 import logging
 
 from app.database import get_db
@@ -17,6 +20,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
 
 
 class LoginRequest(BaseModel):
@@ -56,7 +60,15 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
     if user.status != "Active":
         raise HTTPException(status_code=403, detail="Account is not active")
 
-    return {"user_id": user.user_id, "name": user.name, "email": user.email, "role": user.role}
+    return {
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "status": user.status,
+        "db_id": str(user.id),
+        "last_login": user.last_login.isoformat() if user.last_login else None,
+    }
 
 
 DEMO_ACCOUNTS = {
@@ -78,13 +90,10 @@ def _verify_password(plain: str, hashed: Optional[str]) -> bool:
     if plain == hashed:
         return True
     try:
-        from passlib.context import CryptContext
-        pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
         if pwd_context.verify(plain, hashed):
             return True
     except Exception:
         pass
-    import hashlib
     if hashlib.sha256(plain.encode()).hexdigest() == hashed:
         return True
     if f"$pbkdf2-sha256${hashlib.sha256(plain.encode()).hexdigest()}" == hashed:
@@ -95,10 +104,6 @@ def _verify_password(plain: str, hashed: Optional[str]) -> bool:
 @router.post("/login")
 @limiter.limit("10/minute")
 def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
-    import uuid
-    from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
-
     username = (req.username or "").strip()
     if not username:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username is required")
@@ -109,13 +114,12 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     demo_meta = DEMO_ACCOUNTS.get(username.lower())
 
     user = db.query(User).filter(
-        (User.user_id.ilike(username)) | (User.email.ilike(username))
+        (User.user_id == username) | (User.email == username)
     ).first()
 
     if not user and is_demo_password and demo_meta:
-        # Check if user exists by the demo account's user_id or email
         user = db.query(User).filter(
-            (User.user_id.ilike(demo_meta["user_id"])) | (User.email.ilike(demo_meta["email"]))
+            (User.user_id == demo_meta["user_id"]) | (User.email == demo_meta["email"])
         ).first()
 
     if user:
@@ -200,18 +204,14 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me")
-def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.user_id == current_user["user_id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
+def get_me(current_user: dict = Depends(get_current_user)):
     return {
-        "id": str(user.id),
-        "user_id": user.user_id,
-        "name": user.name,
-        "email": user.email,
-        "role": user.role,
-        "status": user.status,
-        "last_login": user.last_login.isoformat() if user.last_login else None,
+        "id": current_user["db_id"],
+        "user_id": current_user["user_id"],
+        "name": current_user["name"],
+        "email": current_user["email"],
+        "role": current_user["role"],
+        "status": current_user["status"],
+        "last_login": current_user.get("last_login"),
     }
 
