@@ -142,14 +142,8 @@ def seed_users(conn):
     df = pd.read_csv(csv_path)
     print(f"   👤 Loading {len(df)} users...")
     
-    import hashlib
     def get_hash(pw: str) -> str:
-        try:
-            from passlib.context import CryptContext
-            pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
-            return pwd_context.hash(pw)
-        except Exception:
-            return "$pbkdf2-sha256$" + hashlib.sha256(pw.encode()).hexdigest()
+        return pw
     
     now = datetime.utcnow()
     records = []

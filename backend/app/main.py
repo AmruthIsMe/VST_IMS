@@ -22,11 +22,9 @@ limiter = Limiter(key_func=get_remote_address)
 
 def _seed_demo_users():
     """Seed demo users in both local and cloud mode."""
-    from passlib.context import CryptContext
     from datetime import datetime
     import uuid
 
-    pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
     db = SessionLocal()
     try:
         demo_users = [
@@ -37,7 +35,7 @@ def _seed_demo_users():
             {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
             {"user_id": "USR-003", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
         ]
-        hashed = pwd_context.hash("vst2026")
+        hashed = "vst2026"
         now = datetime.utcnow()
         for du in demo_users:
             user = db.query(User).filter(

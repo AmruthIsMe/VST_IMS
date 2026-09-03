@@ -87,7 +87,13 @@ DEMO_PASSWORD = "vst2026"
 def _verify_password(plain: str, stored: Optional[str]) -> bool:
     if not stored:
         return False
-    return plain == stored
+    if plain == stored:
+        return True
+    import hashlib
+    h = hashlib.sha256(plain.encode()).hexdigest()
+    if h == stored or f"$pbkdf2-sha256${h}" == stored:
+        return True
+    return False
 
 
 @router.post("/login")

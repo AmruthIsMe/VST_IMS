@@ -1,14 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
-from passlib.context import CryptContext
 from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserUpdate, UserResponse, PaginatedResponse
 from app.routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/users", tags=["users"])
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -65,7 +63,7 @@ def create_user(data: UserCreate, db: Session = Depends(get_db), current_user: d
         user_id=data.user_id,
         name=data.name,
         email=data.email,
-        password_hash=pwd_context.hash(data.password),
+        password_hash=data.password,
         role=data.role,
         status="Active",
     )
