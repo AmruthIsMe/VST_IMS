@@ -7,8 +7,6 @@ from pydantic import BaseModel
 from jose import jwt, JWTError, ExpiredSignatureError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from passlib.context import CryptContext
-import hashlib
 import uuid
 import logging
 
@@ -20,7 +18,6 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
-pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated=["bcrypt"])
 
 
 class LoginRequest(BaseModel):
@@ -84,21 +81,13 @@ DEMO_ACCOUNTS = {
 }
 
 
-def _verify_password(plain: str, hashed: Optional[str]) -> bool:
-    if not hashed:
+DEMO_PASSWORD = "vst2026"
+
+
+def _verify_password(plain: str, stored: Optional[str]) -> bool:
+    if not stored:
         return False
-    if plain == hashed:
-        return True
-    try:
-        if pwd_context.verify(plain, hashed):
-            return True
-    except Exception:
-        pass
-    if hashlib.sha256(plain.encode()).hexdigest() == hashed:
-        return True
-    if f"$pbkdf2-sha256${hashlib.sha256(plain.encode()).hexdigest()}" == hashed:
-        return True
-    return False
+    return plain == stored
 
 
 @router.post("/login")
@@ -110,22 +99,22 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
 
     logger.info(f"Login attempt for: '{username}'")
 
-    is_demo_password = (req.password == "vst2026")
+    is_demo = (req.password == DEMO_PASSWORD)
     demo_meta = DEMO_ACCOUNTS.get(username.lower())
 
     user = db.query(User).filter(
         (User.user_id == username) | (User.email == username)
     ).first()
 
-    if not user and is_demo_password and demo_meta:
+    if not user and is_demo and demo_meta:
         user = db.query(User).filter(
             (User.user_id == demo_meta["user_id"]) | (User.email == demo_meta["email"])
         ).first()
 
     if user:
         valid_pw = _verify_password(req.password, user.password_hash)
-        if not valid_pw and is_demo_password and demo_meta:
-            user.password_hash = pwd_context.hash("vst2026")
+        if not valid_pw and is_demo and demo_meta:
+            user.password_hash = DEMO_PASSWORD
             user.status = "Active"
             valid_pw = True
 
@@ -142,7 +131,7 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
                 detail="Account is not active",
             )
     else:
-        if is_demo_password and demo_meta:
+        if is_demo and demo_meta:
             logger.info(f"Auto-provisioning demo user '{demo_meta['user_id']}' on login")
             now = datetime.utcnow()
             user = User(
@@ -150,7 +139,7 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
                 user_id=demo_meta["user_id"],
                 name=demo_meta["name"],
                 email=demo_meta["email"],
-                password_hash=pwd_context.hash("vst2026"),
+                password_hash=DEMO_PASSWORD,
                 role=demo_meta["role"],
                 status="Active",
                 created_at=now,
