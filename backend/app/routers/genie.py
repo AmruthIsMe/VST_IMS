@@ -57,7 +57,7 @@ class WhatIfRequest(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit("30/minute")
-async def chat(http_request: Request, request: ChatRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def chat(request: Request, body: ChatRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """
     Send a message to Genie.  The engine routes to the appropriate agent
     (SQL Expert, Stock Advisor, What-If Simulator) and returns a
@@ -65,14 +65,14 @@ async def chat(http_request: Request, request: ChatRequest, db: Session = Depend
     """
     engine = get_genie_engine()
     result = await engine.chat(
-        message=request.message,
-        conversation_id=request.conversation_id,
+        message=body.message,
+        conversation_id=body.conversation_id,
         db=db,
     )
     return ChatResponse(
         response=result["response"],
         intent=result.get("intent", "general"),
-        confidence=result.get("confidence", {"level": "low", "tag": "🤖 AI Insight"}),
+        confidence=result.get("confidence", {"level": "low", "tag": "AI Insight"}),
         conversation_id=result["conversation_id"],
         data_sources=result.get("data_sources", []),
         reasoning_trace=result.get("reasoning_trace"),

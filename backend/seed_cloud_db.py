@@ -311,7 +311,7 @@ def seed_inventory(conn):
     random.seed(42)
 
     from sqlalchemy import text
-    prod_rows = conn.execute(text("SELECT sku_id, category FROM products")).fetchall()
+    prod_rows = conn.execute(text("SELECT sku_id, category FROM products ORDER BY sku_id")).fetchall()
 
     category_ranges = {
         "Spare Parts":        (200, 2000),
