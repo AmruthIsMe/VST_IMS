@@ -24,6 +24,10 @@ class Settings(BaseSettings):
         "http://localhost:8000",
     ]
     CORS_ORIGIN_REGEX: str = r"^https:\/\/.*\.vercel\.app$|^http:\/\/localhost(:\d+)?$"
+    # ── AUTH TOGGLE: Set to True to re-enable authentication ──
+    AUTH_ENABLED: bool = False
+    # ── END AUTH TOGGLE ──
+
     SAP_SYSNR: str = "00"
     SAP_CLIENT: str = "100"
     SAP_USER: str = ""

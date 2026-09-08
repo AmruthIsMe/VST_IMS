@@ -280,7 +280,7 @@ def _generate_purchase_order_batch(d: date):
         for mat in chosen:
             prof = DEMAND_PROFILE.get(mat["MATNR"])
             if prof and prof["mean"] > 0:
-                qty = max(int(prof["moq"] if "moq" in supplier else prof["mean"] * 0.5),
+                qty = max(int(supplier.get("moq", 10)),
                           random.randint(10, 100))
             else:
                 lo, hi = CATEGORY_DEMAND_FALLBACK.get(mat.get("category", ""), (10, 50))

@@ -25,7 +25,11 @@ function AppContent() {
   const { isAuthenticated } = useAuth();
   const { mobileMenuOpen, closeMobileMenu, toggleMobileMenu } = useApp();
 
-  if (!isAuthenticated) {
+  // ── AUTH TOGGLE: Set to false to re-enable login gate ──
+  const AUTH_BYPASS = true;
+  // ── END AUTH TOGGLE ──
+
+  if (!isAuthenticated && !AUTH_BYPASS) {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />

@@ -18,8 +18,8 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 import logging
 
-from app.database import get_db
-from app.models import SapSyncLog, SapConfig
+from app.database import get_db, SessionLocal
+from app.models import SapSyncLog, SapConfig, TrainingRun
 from app.config import get_settings
 from app.services.sap_connector import (
     get_sap_connector, check_mock_erp_status, SAP_MOCK_URL,
@@ -55,8 +55,8 @@ def _write_log(db: Session, sync_type: str, status: str,
         records_synced=records,
         error_message=(error[:2000] if error else None),
         detail_json=_detail_to_json(detail),
-        started_at=datetime.utcnow(),
-        completed_at=datetime.utcnow(),
+        started_at=datetime.now(),
+        completed_at=datetime.now(),
     )
     db.add(log)
     db.commit()
@@ -121,7 +121,7 @@ def _sync_materials(db: Session) -> dict:
     except Exception:
         return _sync_materials_cloud(db)
     materials = response.json().get("d", {}).get("results", [])
-    now = datetime.utcnow()
+    now = datetime.now()
     known = {r[0] for r in db.execute(sql_text("SELECT sku_id FROM products")).fetchall()}
     count = 0
     for m in materials:
@@ -152,7 +152,7 @@ def _sync_materials(db: Session) -> dict:
 
 def _sync_materials_cloud(db: Session) -> dict:
     """Cloud fallback: update timestamps on existing products (no mock ERP needed)."""
-    now = datetime.utcnow()
+    now = datetime.now()
     count = db.execute(
         sql_text("UPDATE products SET last_synced_at = :now WHERE last_synced_at IS NULL"),
         {"now": now}
@@ -169,7 +169,12 @@ def _sync_vendors(db: Session) -> dict:
 
 
 def _sync_stocks(db: Session) -> dict:
-    """Pull live stock from SAP and upsert inventory (raw SQL, UUID-safe)."""
+    """Pull live stock from SAP and update inventory.
+    
+    Only updates quantity_on_hand if the SAP value is > 0 AND the current
+    inventory value is 0 (restocking). Otherwise just records the sync timestamp.
+    This prevents the mock ERP's simulated values from overwriting realistic stock.
+    """
     import httpx
     try:
         response = httpx.get(f"{SAP_MOCK_URL}/sap/opu/odata/sap/API_STOCK_SRV/Stocks", timeout=10)
@@ -178,8 +183,7 @@ def _sync_stocks(db: Session) -> dict:
         stocks = response.json().get("d", {}).get("results", [])
     except Exception:
         return _sync_stocks_cloud(db)
-    stocks = response.json().get("d", {}).get("results", [])
-    now = datetime.utcnow()
+    now = datetime.now()
     existing = {r[0] for r in db.execute(sql_text("SELECT sku_id FROM inventory")).fetchall()}
     count = 0
     for stk in stocks:
@@ -187,24 +191,33 @@ def _sync_stocks(db: Session) -> dict:
         if not matnr:
             continue
         try:
-            on_hand = int(stk.get("LBLAB", 0))
-            reserved = int(stk.get("LFSME", 0))
+            sap_on_hand = int(stk.get("LBLAB", 0))
+            sap_reserved = int(stk.get("LFSME", 0))
         except (TypeError, ValueError):
             continue
         if matnr in existing:
-            db.execute(sql_text("""
-                UPDATE inventory SET quantity_on_hand = :oh, quantity_reserved = :res,
-                       quantity_available = :avail, last_sap_sync_at = :now
-                WHERE sku_id = :sku
-            """), {"oh": on_hand, "res": reserved, "avail": on_hand - reserved, "now": now, "sku": matnr})
+            # Only update if current stock is 0 (restocking from SAP)
+            current = db.execute(sql_text(
+                "SELECT quantity_on_hand FROM inventory WHERE sku_id = :sku"
+            ), {"sku": matnr}).scalar()
+            if current == 0 and sap_on_hand > 0:
+                db.execute(sql_text("""
+                    UPDATE inventory SET quantity_on_hand = :oh, quantity_reserved = :res,
+                           quantity_available = :avail, last_sap_sync_at = :now
+                    WHERE sku_id = :sku
+                """), {"oh": sap_on_hand, "res": sap_reserved, "avail": sap_on_hand - sap_reserved, "now": now, "sku": matnr})
+            else:
+                db.execute(sql_text("""
+                    UPDATE inventory SET last_sap_sync_at = :now WHERE sku_id = :sku
+                """), {"now": now, "sku": matnr})
         else:
             db.execute(sql_text("""
                 INSERT INTO inventory (id, sku_id, quantity_on_hand, quantity_reserved,
                                        quantity_available, last_sap_sync_at)
                 VALUES (:id, :sku, :oh, :res, :avail, :now)
             """), {
-                "id": _uuid(), "sku": matnr, "oh": on_hand, "res": reserved,
-                "avail": on_hand - reserved, "now": now,
+                "id": _uuid(), "sku": matnr, "oh": sap_on_hand, "res": sap_reserved,
+                "avail": sap_on_hand - sap_reserved, "now": now,
             })
         count += 1
     db.commit()
@@ -212,21 +225,12 @@ def _sync_stocks(db: Session) -> dict:
 
 
 def _sync_stocks_cloud(db: Session) -> dict:
-    """Cloud fallback: simulate stock movements on existing inventory."""
-    import random
-    now = datetime.utcnow()
-    rows = db.execute(sql_text(
-        "SELECT sku_id, quantity_on_hand FROM inventory"
-    )).fetchall()
-    count = 0
-    for sku, current_stock in rows:
-        delta = random.randint(-5, 10)
-        new_stock = max(0, (current_stock or 0) + delta)
-        db.execute(sql_text("""
-            UPDATE inventory SET quantity_on_hand = :oh, quantity_available = :oh,
-                   last_sap_sync_at = :now WHERE sku_id = :sku
-        """), {"oh": new_stock, "now": now, "sku": sku})
-        count += 1
+    """Cloud fallback: only record sync timestamp without changing stock levels."""
+    now = datetime.now()
+    db.execute(sql_text(
+        "UPDATE inventory SET last_sap_sync_at = :now"
+    ), {"now": now})
+    count = db.execute(sql_text("SELECT COUNT(*) FROM inventory")).scalar()
     db.commit()
     return {"status": "completed", "records_synced": count, "mode": "cloud"}
 
@@ -258,7 +262,7 @@ def _sync_purchase_orders(db: Session) -> dict:
     for r in db.execute(sql_text("SELECT sap_po_number FROM orders WHERE sap_po_number IS NOT NULL")).fetchall():
         existing_pos.add(r[0])
 
-    now = datetime.utcnow()
+    now = datetime.now()
     inserted = 0
     skipped = 0
 
@@ -370,7 +374,7 @@ def _backfill_sales_to_today(db: Session) -> dict:
     import random
     from statistics import mean as _mean, pstdev as _pstdev
 
-    now = datetime.utcnow()
+    now = datetime.now()
     today = date.today()
     current_monday = _week_monday(today)
     cutoff_26w = current_monday - timedelta(weeks=26)
@@ -405,12 +409,6 @@ def _backfill_sales_to_today(db: Session) -> dict:
         if isinstance(d, date):
             last_week_by_sku[r[0]] = _week_monday(d)
 
-    simulated_current: set[str] = {
-        r[0] for r in db.execute(sql_text(
-            "SELECT DISTINCT sku_id FROM sales WHERE sale_date = :wk AND fulfillment_region = :sim"
-        ), {"wk": current_monday, "sim": SIM_REGION}).fetchall()
-    }
-
     pid_by_sku = {r[0]: r[1] for r in db.execute(sql_text(
         "SELECT sku_id, id FROM products")).fetchall()}
 
@@ -428,36 +426,18 @@ def _backfill_sales_to_today(db: Session) -> dict:
             week += timedelta(days=7)
             sku_gap += 1
             full_qty = max(0, int(round(random.gauss(prof[0] * _seasonal_factor(week), prof[1]))))
-            if week == current_monday:
-                fraction = max(today.weekday() + 1, 1) / 7.0
-                qty = max(0, int(round(full_qty * fraction)))
-                if sku in simulated_current and qty > 0:
-                    db.execute(sql_text(
-                        "UPDATE sales SET units_sold = :qty, created_at = :now WHERE sku_id = :sku AND sale_date = :wk"),
-                        {"qty": qty, "now": now, "sku": sku, "wk": week},
-                    )
-                    updated += 1
-                elif qty > 0:
-                    db.execute(sql_text("""
-                        INSERT INTO sales (id, sale_date, product_id, sku_id, units_sold,
-                                           fulfillment_region, stockout_flag, created_at)
-                        VALUES (:id, :sale_date, :product_id, :sku_id, :units_sold,
-                                :region, FALSE, :created_at)
-                    """), {"id": _uuid(), "sale_date": week, "product_id": pid, "sku_id": sku,
-                           "units_sold": qty, "region": SIM_REGION, "created_at": now})
-                    inserted += 1
-            else:
-                db.execute(sql_text("""
-                    INSERT INTO sales (id, sale_date, product_id, sku_id, units_sold,
-                                       fulfillment_region, stockout_flag, created_at)
-                    VALUES (:id, :sale_date, :product_id, :sku_id, :units_sold,
-                            :region, FALSE, :created_at)
-                """), {"id": _uuid(), "sale_date": week, "product_id": pid, "sku_id": sku,
-                       "units_sold": full_qty, "region": SIM_REGION, "created_at": now})
-                inserted += 1
+            db.execute(sql_text("""
+                INSERT INTO sales (id, sale_date, product_id, sku_id, units_sold,
+                                   fulfillment_region, stockout_flag, created_at)
+                VALUES (:id, :sale_date, :product_id, :sku_id, :units_sold,
+                        :region, FALSE, :created_at)
+            """), {"id": _uuid(), "sale_date": week, "product_id": pid, "sku_id": sku,
+                   "units_sold": full_qty, "region": SIM_REGION, "created_at": now})
+            inserted += 1
         max_gap_weeks = max(max_gap_weeks, sku_gap)
 
     db.commit()
+
     return {
         "status": "completed",
         "coverage_to": current_monday.isoformat(),
@@ -556,7 +536,7 @@ def _sync_sales(db: Session) -> dict:
             bucket = buckets.setdefault(key, {"qty": 0, "region": order.get("REGIO"), "pid": product_id})
             bucket["qty"] += qty
 
-    now = datetime.utcnow()
+    now = datetime.now()
     # Live-week rows get replaced by fresh SAP actuals; simulated rows are
     # replaced by real data for their week.
     replace_keys = {k for k in buckets if k[1] == current_week} | {k for k in buckets if k in simulated_pairs}
@@ -644,7 +624,7 @@ def _run_full_sync(db: Session) -> dict:
             _write_log(db, name, "failed", 0, error=str(e))
             overall = "partial"
     if config:
-        config.last_sync_at = datetime.utcnow()
+        config.last_sync_at = datetime.now()
         db.commit()
     return {"status": overall, "records_synced": total, "details": details}
 
@@ -694,7 +674,7 @@ def sync_sales(current_user=Depends(get_current_user)):
         _write_log(session, "sales", result.get("status"),
                    result.get("records_synced", 0), detail=result)
         config = _get_config(session)
-        config.last_sync_at = datetime.utcnow()
+        config.last_sync_at = datetime.now()
         session.commit()
         return {"status": "completed", "records_synced": result.get("records_synced", 0),
                 "details": {"sales": result}}
@@ -729,8 +709,11 @@ def sync_and_retrain(
       sync → RL evaluation of previous forecasts vs new actuals →
       optional retrain → fresh 12-week forecast generation.
     Synchronous; can take ~30-90 seconds when retrain=true.
+
+    In cloud mode (DEPLOYMENT_MODE=cloud), training is skipped.
+    Training must be run locally via `python train_and_upload.py`.
     """
-    from app.database import SessionLocal
+    settings = get_settings()
     session = SessionLocal()
     report = {"status": "completed", "retrain": retrain}
     try:
@@ -750,53 +733,99 @@ def sync_and_retrain(
             _write_log(session, "rl_evaluation", "failed", 0, error=str(e))
 
         if retrain:
-            from app.forecasting import training_progress as progress
-            from app.forecasting.ensemble import get_ensemble
-            try:
-                progress.start_training()
-                ensemble = get_ensemble()
-                train_result = ensemble.train_all_models(test_weeks=12)
-                failed = train_result.get("metadata", {}).get("models_trained", 0) == 0 \
-                    and all(
-                        r.get("status") != "trained"
-                        for r in train_result.get("models", {}).values()
-                    )
-                trained_count = sum(
-                    1 for r in train_result.get("models", {}).values()
-                    if r.get("status") == "trained"
-                )
-                progress.complete_training(error="all models failed" if failed else None)
-                weights = ensemble.weights
+            if settings.is_cloud:
                 report["details"]["training"] = {
-                    "status": "failed" if failed else "completed",
-                    "models_trained": trained_count,
-                    "weights": weights,
-                    "elapsed_seconds": train_result.get("metadata", {}).get("elapsed_seconds"),
-                    "ensemble_mape": train_result.get("ensemble", {}).get("mape"),
-                    "error": train_result.get("error"),
+                    "status": "skipped",
+                    "message": "Training skipped on cloud. Run locally or use the Sync & Retrain button.",
                 }
-                _write_log(session, "retrain",
-                           "failed" if failed else "completed", trained_count,
-                           error=train_result.get("error"), detail={
-                               "models_trained": trained_count,
-                               "ensemble_mape": train_result.get("ensemble", {}).get("mape"),
-                           })
-            except Exception as e:
-                progress.complete_training(error=str(e))
-                logger.error(f"Retrain failed: {e}")
-                report["details"]["training"] = {"status": "failed", "error": str(e)}
-                _write_log(session, "retrain", "failed", 0, error=str(e))
+                _write_log(session, "retrain", "skipped", 0,
+                           detail={"message": "Cloud mode: training must be run locally"})
+            else:
+                from app.forecasting import training_progress as progress
+                from app.forecasting.ensemble import get_ensemble
+                import json as _json
+                try:
+                    progress.start_training()
+                    ensemble = get_ensemble()
+                    train_result = ensemble.train_all_models_parallel(test_weeks=12, max_workers=4)
+                    failed = train_result.get("metadata", {}).get("models_trained", 0) == 0 \
+                        and all(
+                            r.get("status") != "trained"
+                            for r in train_result.get("models", {}).values()
+                        )
+                    trained_count = sum(
+                        1 for r in train_result.get("models", {}).values()
+                        if r.get("status") == "trained"
+                    )
+                    progress.complete_training(error="all models failed" if failed else None)
+                    weights = ensemble.weights
 
-            try:
-                from app.forecasting.evaluation import regenerate_forecasts
-                fc_summary = regenerate_forecasts(session, horizon_weeks=12)
-                report["details"]["forecast"] = fc_summary
-                _write_log(session, "forecast_12w", fc_summary["status"],
-                           fc_summary.get("rows_stored", 0), detail=fc_summary)
-            except Exception as e:
-                logger.error(f"Forecast regeneration failed: {e}")
-                report["details"]["forecast"] = {"status": "failed", "error": str(e)}
-                _write_log(session, "forecast_12w", "failed", 0, error=str(e))
+                    # Record training run in training_runs table
+                    sku_count = train_result.get("metadata", {}).get("sku_count", 0)
+                    elapsed = train_result.get("metadata", {}).get("elapsed_seconds", 0)
+                    ensemble_mape = train_result.get("ensemble", {}).get("mape")
+
+                    per_model = {}
+                    for mn, r in train_result.get("models", {}).items():
+                        tm = r.get("test_metrics", {}) or {}
+                        per_model[mn] = {
+                            "status": r.get("status"),
+                            "mae": tm.get("mae"),
+                            "mape": tm.get("mape"),
+                            "rmse": tm.get("rmse"),
+                        }
+
+                    from app.models import TrainingRun
+                    import uuid as _uuidmod
+                    training_run = TrainingRun(
+                        id=_uuidmod.uuid4(),
+                        trained_at=datetime.now(),
+                        trained_on="local",
+                        elapsed_seconds=elapsed,
+                        models_trained=trained_count,
+                        ensemble_mape=ensemble_mape,
+                        sku_count=sku_count,
+                        predictions_uploaded=0,
+                        trigger="web",
+                        weights=_json.dumps(weights, default=str),
+                        per_model_metrics=_json.dumps(per_model, default=str),
+                    )
+                    session.add(training_run)
+                    session.commit()
+
+                    report["details"]["training"] = {
+                        "status": "failed" if failed else "completed",
+                        "models_trained": trained_count,
+                        "weights": weights,
+                        "elapsed_seconds": elapsed,
+                        "ensemble_mape": ensemble_mape,
+                        "error": train_result.get("error"),
+                        "sku_count": sku_count,
+                        "trained_at": training_run.trained_at.isoformat(),
+                    }
+                    _write_log(session, "retrain",
+                               "failed" if failed else "completed", trained_count,
+                               error=train_result.get("error"), detail={
+                                   "models_trained": trained_count,
+                                   "ensemble_mape": ensemble_mape,
+                                   "sku_count": sku_count,
+                               })
+                except Exception as e:
+                    progress.complete_training(error=str(e))
+                    logger.error(f"Retrain failed: {e}")
+                    report["details"]["training"] = {"status": "failed", "error": str(e)}
+                    _write_log(session, "retrain", "failed", 0, error=str(e))
+
+                try:
+                    from app.forecasting.evaluation import regenerate_forecasts
+                    fc_summary = regenerate_forecasts(session, horizon_weeks=12)
+                    report["details"]["forecast"] = fc_summary
+                    _write_log(session, "forecast_12w", fc_summary["status"],
+                               fc_summary.get("rows_stored", 0), detail=fc_summary)
+                except Exception as e:
+                    logger.error(f"Forecast regeneration failed: {e}")
+                    report["details"]["forecast"] = {"status": "failed", "error": str(e)}
+                    _write_log(session, "forecast_12w", "failed", 0, error=str(e))
 
         failed_phases = [
             k for k, v in report.get("details", {}).items()
@@ -827,7 +856,7 @@ def sync_status(db: Session = Depends(get_db)):
         config = None
 
     try:
-        logs = db.query(SapSyncLog).order_by(SapSyncLog.started_at.desc()).limit(12).all()
+        logs = db.query(SapSyncLog).order_by(SapSyncLog.started_at.desc()).limit(50).all()
     except Exception as e:
         logger.warning(f"Failed to query SAP sync logs: {e}")
         db.rollback()
@@ -850,15 +879,81 @@ def sync_status(db: Session = Depends(get_db)):
             "error_message": l.error_message,
         }
 
+    # Group logs into sync runs: logs within 5 minutes of each other belong
+    # to the same _run_full_sync call.  Return ONE consolidated row per run.
+    grouped: list[dict] = []
+    current_run: list[SapSyncLog] = []
+    for log in logs:
+        if current_run and log.started_at and current_run[0].started_at:
+            gap = abs((log.started_at - current_run[0].started_at).total_seconds())
+            if gap <= 300:
+                current_run.append(log)
+                continue
+        if current_run:
+            grouped.append(current_run)
+        current_run = [log]
+    if current_run:
+        grouped.append(current_run)
+
+    def _consolidate(run_logs):
+        statuses = [l.status for l in run_logs]
+        total_records = sum(l.records_synced or 0 for l in run_logs)
+        started = min((l.started_at for l in run_logs if l.started_at), default=None)
+        completed = max((l.completed_at for l in run_logs if l.completed_at), default=None)
+        errors = [l.error_message for l in run_logs if l.error_message]
+        modules = [l.sync_type for l in run_logs]
+        overall = "completed" if all(s == "completed" for s in statuses) else (
+            "failed" if any(s == "failed" for s in statuses) else "partial")
+        return {
+            "id": str(run_logs[0].id),
+            "sync_type": "sync_and_retrain",
+            "status": overall,
+            "records_synced": total_records,
+            "started_at": started.isoformat() if started else None,
+            "completed_at": completed.isoformat() if completed else None,
+            "error_message": "; ".join(errors) if errors else None,
+            "modules_synced": modules,
+        }
+
+    recent_runs = [_consolidate(g) for g in grouped[:10]]
+
     latest = logs[0] if logs else None
     running = bool(latest and latest.completed_at is None
                    and latest.started_at
-                   and (datetime.utcnow() - latest.started_at).total_seconds() < 300)
+                   and (datetime.now() - latest.started_at).total_seconds() < 300)
 
     return {
         "connected": bool(mock.get("connected")) or running or get_settings().is_cloud,
         "last_sync": config.last_sync_at.isoformat() if config and config.last_sync_at else None,
-        "latest_log": _log_dto(latest) if latest else None,
+        "latest_log": _consolidate(grouped[0]) if grouped else None,
         "running": running,
-        "recent_logs": [_log_dto(l) for l in logs],
+        "recent_logs": recent_runs,
+    }
+
+
+@router.get("/last-training-info")
+def last_training_info(db: Session = Depends(get_db)):
+    """Return metadata about the most recent training run from the training_runs table."""
+    try:
+        run = db.query(TrainingRun).order_by(TrainingRun.trained_at.desc()).first()
+    except Exception as e:
+        logger.warning(f"Failed to query training_runs: {e}")
+        db.rollback()
+        return {"has_training": False, "error": str(e)}
+
+    if not run:
+        return {"has_training": False}
+
+    return {
+        "has_training": True,
+        "trained_at": run.trained_at.isoformat() if run.trained_at else None,
+        "trained_on": run.trained_on,
+        "elapsed_seconds": run.elapsed_seconds,
+        "models_trained": run.models_trained,
+        "ensemble_mape": run.ensemble_mape,
+        "sku_count": run.sku_count,
+        "predictions_uploaded": run.predictions_uploaded,
+        "trigger": run.trigger,
+        "weights": run.weights,
+        "per_model_metrics": run.per_model_metrics,
     }

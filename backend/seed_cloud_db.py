@@ -81,7 +81,7 @@ def seed_products(conn):
     df = pd.read_csv(csv_path)
     print(f"   📦 Loading {len(df)} products...")
     
-    now = datetime.utcnow()
+    now = datetime.now()
     records = []
     for _, row in df.iterrows():
         records.append({
@@ -111,7 +111,7 @@ def seed_suppliers(conn):
     df = pd.read_csv(csv_path)
     print(f"   🏭 Loading {len(df)} suppliers...")
     
-    now = datetime.utcnow()
+    now = datetime.now()
     records = []
     for _, row in df.iterrows():
         records.append({
@@ -145,7 +145,7 @@ def seed_users(conn):
     def get_hash(pw: str) -> str:
         return pw
     
-    now = datetime.utcnow()
+    now = datetime.now()
     records = []
     for _, row in df.iterrows():
         pw = str(row.get("Password", "vst2026"))
@@ -268,7 +268,7 @@ def seed_forecasts(conn):
     prod_rows = conn.execute(text("SELECT id, sku_id FROM products")).fetchall()
     sku_to_id = {row[1]: row[0] for row in prod_rows}
     
-    now = datetime.utcnow()
+    now = datetime.now()
     records = []
     for _, row in df.iterrows():
         sku_id = row.get("SKU_ID", "")
@@ -329,7 +329,7 @@ def seed_inventory(conn):
         "Precision Components": (15000.0, 65000.0),
     }
 
-    now = datetime.utcnow()
+    now = datetime.now()
     records = []
     for sku_id, category in prod_rows:
         lo, hi = category_ranges.get(category, (50, 500))

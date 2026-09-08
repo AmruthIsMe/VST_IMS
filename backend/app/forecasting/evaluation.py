@@ -34,7 +34,7 @@ def _new_pred_row(**fields) -> dict:
     import uuid
     row = {
         'id': uuid.uuid4(),
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(),
         "actual_demand": None,
     }
     row.update(fields)

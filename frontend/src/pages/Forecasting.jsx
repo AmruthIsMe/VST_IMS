@@ -333,7 +333,23 @@ export default function Forecasting({ onMenuToggle }) {
                           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                           <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#667085' }} type="category" allowDuplicatedCategory={false} />
                           <YAxis tick={{ fontSize: 11, fill: '#667085' }} />
-                          <Tooltip contentStyle={{ borderRadius: 10, fontSize: 12 }} />
+                          <Tooltip
+                            contentStyle={{ borderRadius: 10, fontSize: 12 }}
+                            content={({ active, payload, label }) => {
+                              if (!active || !payload?.length) return null;
+                              const upper = payload.find(p => p.dataKey === 'upper');
+                              const forecast = payload.find(p => p.dataKey === 'forecast');
+                              const actual = payload.find(p => p.dataKey === 'actual');
+                              return (
+                                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '8px 12px', fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+                                  <div style={{ fontWeight: 600, marginBottom: 4, color: '#374151' }}>{label}</div>
+                                  {upper && <div style={{ color: '#2563eb' }}>Upper Bound : {Number(upper.value).toFixed(1)}</div>}
+                                  {forecast && <div style={{ color: '#2563eb' }}>Ensemble Forecast : {Number(forecast.value).toFixed(1)}</div>}
+                                  {actual && <div style={{ color: '#1a1d1a' }}>Actual Demand : {Number(actual.value).toFixed(1)}</div>}
+                                </div>
+                              );
+                            }}
+                          />
                           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
                           <Line
                             data={skuData.history?.dates?.map((d, i) => ({ date: d, actual: skuData.history.values[i] })) || []}

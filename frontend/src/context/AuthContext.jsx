@@ -9,6 +9,24 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // ── AUTH TOGGLE: Set to true to re-enable token validation ──
+    const AUTH_ENABLED = false;
+    // ── END AUTH TOGGLE ──
+
+    if (!AUTH_ENABLED) {
+      setUser({
+        id: "00000000-0000-0000-0000-000000000000",
+        user_id: "admin",
+        name: "Dev User",
+        email: "dev@vst.com",
+        role: "Admin",
+        status: "Active",
+      });
+      setToken("dev-bypass-token");
+      setLoading(false);
+      return;
+    }
+
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       api.get('/auth/me')

@@ -1,16 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSapSyncStatus, testSapConnection, syncAll, checkSapMockStatus, getTrainingStatus } from '../services/api';
+import { getSapSyncStatus, testSapConnection, syncAndRetrain, checkSapMockStatus, getTrainingStatus, getLastTrainingInfo } from '../services/api';
 import Header from '../components/Header';
-import { Database, RefreshCw, CheckCircle, XCircle, Zap, Server, ExternalLink, Play, Copy, Check, BadgeCheck } from 'lucide-react';
+import { Database, RefreshCw, CheckCircle, XCircle, Zap, Server, ExternalLink, Play, Copy, Check, BadgeCheck, Clock, Cpu, TrendingUp, AlertTriangle } from 'lucide-react';
 
 export default function SapSync({ onMenuToggle }) {
   const qc = useQueryClient();
   const [syncProgress, setSyncProgress] = useState(null);
-  const [debugLog, setDebugLog] = useState(null);
-  const [copied, setCopied] = useState(false);
-  const [forecastReady, setForecastReady] = useState(false);
-  const [recentlySynced, setRecentlySynced] = useState(false);
+  const [resultMessage, setResultMessage] = useState(null);
 
   const { data: status } = useQuery({
     queryKey: ['sap-sync-status'],
@@ -28,91 +25,71 @@ export default function SapSync({ onMenuToggle }) {
     queryKey: ['training-status'],
     queryFn: () => getTrainingStatus().then((r) => r.data),
     refetchInterval: (query) => {
-      const data = query.state.data;
       if (syncProgress) return 2000;
-      if (recentlySynced) return 2000;
+      const data = query.state.data;
       if (data?.status === 'training') return 2000;
-      return false;
+      return 5000;
     },
   });
 
-  useEffect(() => {
-    if (trainingStatus && (trainingStatus.status === 'completed' || trainingStatus.status === 'failed')) {
-      setRecentlySynced(false);
-    }
-  }, [trainingStatus]);
+  const { data: lastTraining } = useQuery({
+    queryKey: ['last-training-info'],
+    queryFn: () => getLastTrainingInfo().then((r) => r.data),
+    refetchInterval: 10000,
+  });
 
-  const syncAllMut = useMutation({
+  const retrainMut = useMutation({
     mutationFn: () => {
-      setSyncProgress({ stage: 'syncing' });
-      setDebugLog(null);
-      setForecastReady(false);
-      return syncAll();
+      setSyncProgress({ stage: 'starting' });
+      setResultMessage(null);
+      return syncAndRetrain();
     },
     onSuccess: (r) => {
-      setSyncProgress({ stage: 'retraining', result: r.data });
-      setRecentlySynced(true);
-      const now = new Date().toISOString();
       const details = r.data.details || {};
-      const lines = [
-        `=== SAP SYNC + RETRAIN REPORT ===`,
-        `Timestamp: ${now}`,
-        `Overall Status: ${r.data.status}`,
-        `Total Records Synced: ${r.data.records_synced}`,
-        `ML Retrain: ${r.data.retrain}`,
-        ``,
-        `--- MODULE DETAILS ---`,
-      ];
-      const fmtW = (w) => Object.entries(w || {}).map(([k, v]) => `${k}=${(v * 100).toFixed(1)}%`).join(' ');
-      for (const [mod, info] of Object.entries(details)) {
-        const st = info.status === 'completed' ? '[OK]' : info.status === 'failed' ? '[FAIL]' : '[WARN]';
-        if (typeof info.orders_fetched === 'number') {
-          lines.push(`${st} ${mod}: +${info.records_synced} rows inserted from SAP (fetched=${info.orders_fetched}, dupes=${info.duplicates_skipped ?? 0})`);
-          const bf = info.backfill_to_today;
-          if (bf && !bf.error) {
-            lines.push(`     simulated to today: +${bf.simulated_rows_inserted ?? 0} rows inserted, ${bf.simulated_rows_updated ?? 0} live-week rows updated (coverage → ${bf.coverage_to ?? 'n/a'})`);
-          } else if (bf?.error) {
-            lines.push(`     backfill failed: ${bf.error}`);
-          }
-        } else if (typeof info.pairs_evaluated === 'number') {
-          lines.push(`${st} ${mod}: ${info.message}`);
-          if (info.blended_weights && Object.keys(info.blended_weights).length) {
-            lines.push(`     blended weights: ${fmtW(info.blended_weights)}`);
-          }
-        } else if (typeof info.models_trained === 'number') {
-          lines.push(`${st} ${mod}: ${info.models_trained}/6 models · ensemble MAPE ${info.ensemble_mape ?? 'N/A'}% · ${info.elapsed_seconds ?? '?'}s`);
-          if (info.weights) lines.push(`     new weights: ${fmtW(info.weights)}`);
-        } else if (typeof info.rows_stored === 'number') {
-          lines.push(`${st} ${mod}: ${info.message} window: ${info.forecast_window ?? ''}`);
-        } else if (typeof info.records_synced === 'number') {
-          lines.push(`${st} ${mod}: ${info.records_synced} records`);
-        } else {
-          lines.push(`${st} ${mod}: ${JSON.stringify(info).slice(0, 160)}`);
-        }
-        if (info.error) lines.push(`    Error: ${info.error}`);
+      const training = details.training || {};
+      const forecast = details.forecast || {};
+      const rl = details.rl_feedback || {};
+
+      if (training.status === 'completed') {
+        setResultMessage({
+          type: 'success',
+          title: 'Sync & Retrain Complete',
+          text: `Trained ${training.models_trained}/6 models in ${training.elapsed_seconds}s. Ensemble MAPE: ${training.ensemble_mape}%. ${forecast.rows_stored || 0} predictions generated for ${training.sku_count || 0} SKUs.`,
+        });
+      } else if (training.status === 'skipped') {
+        setResultMessage({
+          type: 'info',
+          title: 'Sync Complete (Training Skipped)',
+          text: training.message || 'Training was skipped. Data synced and RL evaluation completed.',
+        });
+      } else if (training.status === 'failed') {
+        setResultMessage({
+          type: 'error',
+          title: 'Training Failed',
+          text: training.error || 'An error occurred during training. Check the logs.',
+        });
+      } else {
+        setResultMessage({
+          type: 'info',
+          title: 'Sync Complete',
+          text: `Data synced. ${rl.pairs_evaluated || 0} forecast pairs evaluated.`,
+        });
       }
-      setDebugLog(lines.join('\n'));
+
+      setSyncProgress(null);
       qc.invalidateQueries(['sap-sync-status']);
+      qc.invalidateQueries(['last-training-info']);
+      qc.invalidateQueries(['training-history']);
       qc.invalidateQueries(['forecast-products']);
       qc.invalidateQueries(['sku-explorer']);
-      qc.invalidateQueries(['reorder-recs']);
-      qc.invalidateQueries(['forecast-compare']);
-      setTimeout(() => {
-        setSyncProgress(null);
-        setForecastReady(true);
-      }, 4000);
     },
     onError: (err) => {
-      const now = new Date().toISOString();
       const detail = err.response?.data?.detail || err.message || 'Unknown error';
-      setDebugLog([
-        `=== SAP SYNC REPORT ===`,
-        `Timestamp: ${now}`,
-        `Overall Status: FAILED`,
-        ``,
-        `--- ERROR ---`,
-        detail,
-      ].join('\n'));
+      setResultMessage({
+        type: 'error',
+        title: 'Sync Failed',
+        text: detail,
+      });
       setSyncProgress(null);
     },
   });
@@ -123,58 +100,84 @@ export default function SapSync({ onMenuToggle }) {
 
   const isConnected = status?.connected || mockStatus?.connected;
 
-  const copyLog = () => {
-    if (!debugLog) return;
-    navigator.clipboard.writeText(debugLog).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+  const formatTimeAgo = (isoString) => {
+    if (!isoString) return 'Never';
+    const diff = Date.now() - new Date(isoString).getTime();
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days}d ${hours % 24}h ago`;
+    if (hours > 0) return `${hours}h ago`;
+    const minutes = Math.floor(diff / 60000);
+    return `${minutes}m ago`;
   };
+
+  const isTraining = trainingStatus?.status === 'training' || syncProgress;
 
   return (
     <div>
-      <Header locationText="SAP ERP Integration — Live Sync" onMenuToggle={onMenuToggle} />
+      <Header locationText="SAP ERP Integration" onMenuToggle={onMenuToggle} />
 
       <div className="page-container">
+        {/* Page Header */}
         <div className="page-banner" style={{ justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div className="page-banner-icon">
               <Database size={24} />
             </div>
-            <h1 className="page-banner-title">SAP ERP Sync</h1>
+            <div>
+              <h1 className="page-banner-title" style={{ margin: 0 }}>SAP Sync & Retrain</h1>
+              <p style={{ fontSize: 12, color: '#667085', margin: 0 }}>
+                One-click sync data from SAP, retrain ML models, and generate fresh forecasts
+              </p>
+            </div>
           </div>
-
           <button className="btn-primary" onClick={() => testMut.mutate()} disabled={testMut.isPending}>
-            {testMut.isPending ? 'Testing Connection...' : 'Test SAP Connection'}
+            {testMut.isPending ? 'Testing...' : 'Test Connection'}
           </button>
         </div>
 
-        {/* Connection Status KPIs */}
+        {/* Status KPIs */}
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
-            <div className="kpi-label">Connection Status</div>
-            <div className="kpi-value" style={{ fontSize: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="kpi-label">SAP Connection</div>
+            <div className="kpi-value" style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
               {isConnected ? (
-                <><CheckCircle size={22} color="var(--primary)" /> Connected</>
+                <><CheckCircle size={20} color="var(--primary)" /> Connected</>
               ) : (
-                <><XCircle size={22} color="var(--danger-text)" /> Not Configured</>
-              )}
-            </div>
-          </div>
-
-          <div className="kpi-card">
-            <div className="kpi-label">SAP System</div>
-            <div className="kpi-value" style={{ fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Server size={18} />
-              {mockStatus?.connected ? (
-                <span>{mockStatus.plant_name || 'Plant 1000'}</span>
-              ) : (
-                <span>{status?.connected ? 'Real SAP' : 'Not Connected'}</span>
+                <><XCircle size={20} color="var(--danger-text)" /> Offline</>
               )}
             </div>
             {mockStatus?.connected && (
               <div style={{ fontSize: 11, color: '#667085', marginTop: 4 }}>
-                {mockStatus.materials_count} materials | {mockStatus.stock_records} stock records | {mockStatus.sales_orders} sales orders
+                {mockStatus.materials_count} materials · {mockStatus.sales_orders} orders
+              </div>
+            )}
+          </div>
+
+          <div className="kpi-card">
+            <div className="kpi-label">Last Training</div>
+            <div className="kpi-value" style={{ fontSize: 18 }}>
+              {lastTraining?.has_training ? formatTimeAgo(lastTraining.trained_at) : 'Never'}
+            </div>
+            {lastTraining?.has_training && (
+              <div style={{ fontSize: 11, color: '#667085', marginTop: 4 }}>
+                MAPE: {lastTraining.ensemble_mape}% · {lastTraining.models_trained}/6 models
+              </div>
+            )}
+          </div>
+
+          <div className="kpi-card">
+            <div className="kpi-label">Forecast Status</div>
+            <div className="kpi-value" style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {lastTraining?.has_training ? (
+                <><TrendingUp size={20} color="var(--primary)" /> Active</>
+              ) : (
+                <><AlertTriangle size={20} color="#b54708" /> No Forecasts</>
+              )}
+            </div>
+            {lastTraining?.has_training && (
+              <div style={{ fontSize: 11, color: '#667085', marginTop: 4 }}>
+                {lastTraining.predictions_uploaded} predictions · {lastTraining.sku_count} SKUs
               </div>
             )}
           </div>
@@ -187,33 +190,120 @@ export default function SapSync({ onMenuToggle }) {
           </div>
         </div>
 
-        {/* Sync Progress Banner */}
-        {syncProgress && (
-          <div className="forecast-status-banner training">
-            <RefreshCw size={18} className="spin" />
-            {syncProgress.stage === 'syncing' && 'Syncing SAP data, evaluating forecasts against new actuals (RL feedback), then retraining models — this can take up to ~90s...'}
-            {syncProgress.stage === 'retraining' && 'Retraining ML models with UCB1 feedback loop...'}
-          </div>
-        )}
+        {/* ═══ ONE BIG BUTTON ═══ */}
+        <div style={{
+          padding: '40px 32px', borderRadius: 16, border: '2px solid #eaecf0', backgroundColor: '#fff',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.06)', textAlign: 'center', marginBottom: 24,
+        }}>
+          {isTraining ? (
+            <>
+              <RefreshCw size={48} className="spin" color="#e9730c" style={{ marginBottom: 16 }} />
+              <h2 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 8px 0', color: '#b54708' }}>
+                Training Models...
+              </h2>
+              <p style={{ fontSize: 14, color: '#667085', margin: '0 0 16px 0' }}>
+                {syncProgress?.stage === 'starting' && 'Syncing SAP data, then training all 6 ML models...'}
+                {trainingStatus?.status === 'training' && `Training ${trainingStatus.models_completed + 1}/6 models...`}
+              </p>
+              {trainingStatus && (
+                <div style={{ maxWidth: 400, margin: '0 auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: '#667085' }}>Progress</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#1a1d1a' }}>
+                      {Math.round(((trainingStatus.models_completed || 0) / (trainingStatus.total_models || 6)) * 100)}%
+                    </span>
+                  </div>
+                  <div style={{ height: 8, backgroundColor: '#f2f4f7', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${((trainingStatus.models_completed || 0) / (trainingStatus.total_models || 6)) * 100}%`,
+                      backgroundColor: '#e9730c',
+                      borderRadius: 4,
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+                    {['xgboost', 'lightgbm', 'arima', 'sarima', 'prophet', 'holt_winters'].map((model) => {
+                      const info = trainingStatus.models?.[model];
+                      const st = info?.status || 'pending';
+                      return (
+                        <span key={model} style={{
+                          fontSize: 10, padding: '3px 8px', borderRadius: 4, fontFamily: 'monospace', fontWeight: 600,
+                          backgroundColor: st === 'completed' ? '#ecfdf3' : st === 'failed' ? '#fef3f2' : st === 'training' ? '#fffaeb' : '#f2f4f7',
+                          color: st === 'completed' ? '#027a48' : st === 'failed' ? '#dc2626' : st === 'training' ? '#b54708' : '#667085',
+                          border: `1px solid ${st === 'completed' ? '#a6f4c5' : st === 'failed' ? '#fecdca' : st === 'training' ? '#fedf89' : '#eaecf0'}`,
+                        }}>
+                          {st === 'completed' && '✓ '}{st === 'failed' && '✗ '}{st === 'training' && '... '}{model}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <Cpu size={48} color="#667085" style={{ marginBottom: 16 }} />
+              <h2 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 8px 0', color: '#1a1d1a' }}>
+                Sync & Retrain
+              </h2>
+              <p style={{ fontSize: 14, color: '#667085', margin: '0 0 24px 0', maxWidth: 500, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+                Syncs all data from SAP (materials, vendors, stocks, orders, sales),
+                evaluates existing forecasts against new actuals, retrains all 6 ML models
+                in parallel, and generates 12-week predictions for every SKU.
+              </p>
+              <button
+                className="btn-primary"
+                style={{
+                  padding: '16px 56px', fontSize: 18, fontWeight: 800, borderRadius: 12,
+                  display: 'inline-flex', alignItems: 'center', gap: 10,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                }}
+                onClick={() => retrainMut.mutate()}
+                disabled={!isConnected}
+              >
+                <Play size={20} />
+                Sync & Retrain All Models
+              </button>
+              {!isConnected && (
+                <p style={{ fontSize: 12, color: '#dc2626', marginTop: 12 }}>
+                  SAP connection required. Check connection status above.
+                </p>
+              )}
+              <p style={{ fontSize: 11, color: '#667085', marginTop: 16 }}>
+                Takes approximately 15-30 seconds. Safe to run multiple times — old predictions are replaced.
+              </p>
+            </>
+          )}
+        </div>
 
-        {/* Forecast Ready Badge */}
-        {forecastReady && !syncProgress && (
+        {/* Result Message */}
+        {resultMessage && (
           <div style={{
-            padding: '12px 20px', borderRadius: 10, marginBottom: 20,
-            backgroundColor: '#ecfdf3', border: '1px solid #a6f4c5',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px 20px', borderRadius: 12, marginBottom: 20,
+            backgroundColor: resultMessage.type === 'success' ? '#ecfdf3' : resultMessage.type === 'error' ? '#fef3f2' : '#eff8ff',
+            border: `1px solid ${resultMessage.type === 'success' ? '#a6f4c5' : resultMessage.type === 'error' ? '#fecdca' : '#b4cff5'}`,
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <BadgeCheck size={20} color="#027a48" />
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#027a48' }}>
-                Forecast Ready — Models retrained with latest SAP data
-              </span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              {resultMessage.type === 'success' && <BadgeCheck size={20} color="#027a48" style={{ marginTop: 2 }} />}
+              {resultMessage.type === 'error' && <XCircle size={20} color="#dc2626" style={{ marginTop: 2 }} />}
+              {resultMessage.type === 'info' && <CheckCircle size={20} color="#175cd3" style={{ marginTop: 2 }} />}
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: resultMessage.type === 'success' ? '#027a48' : resultMessage.type === 'error' ? '#dc2626' : '#175cd3', marginBottom: 4 }}>
+                  {resultMessage.title}
+                </div>
+                <div style={{ fontSize: 13, color: '#344054', lineHeight: 1.5 }}>
+                  {resultMessage.text}
+                </div>
+              </div>
             </div>
             <button
-              onClick={() => setForecastReady(false)}
+              onClick={() => setResultMessage(null)}
               style={{
-                padding: '4px 12px', borderRadius: 6, border: '1px solid #a6f4c5',
-                backgroundColor: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#027a48',
+                padding: '4px 10px', borderRadius: 6, border: '1px solid #eaecf0',
+                backgroundColor: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#667085',
+                flexShrink: 0,
               }}
             >
               Dismiss
@@ -221,205 +311,144 @@ export default function SapSync({ onMenuToggle }) {
           </div>
         )}
 
-        {/* Training Progress Panel */}
-        {trainingStatus && trainingStatus.status !== 'idle' && (
+        {/* Training History */}
+        {lastTraining?.has_training && (
           <div style={{
             borderRadius: 14, border: '1px solid #eaecf0', backgroundColor: '#fff',
             boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginBottom: 24, overflow: 'hidden',
           }}>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 20px', borderBottom: '1px solid #eaecf0',
-              backgroundColor: trainingStatus.status === 'training' ? '#fffaeb' : '#ecfdf3',
+              padding: '14px 20px', borderBottom: '1px solid #eaecf0', backgroundColor: '#f9fafb',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {trainingStatus.status === 'training' ? (
-                  <RefreshCw size={18} className="spin" color="#b54708" />
-                ) : (
-                  <BadgeCheck size={18} color="#027a48" />
-                )}
-                <span style={{ fontSize: 14, fontWeight: 700, color: trainingStatus.status === 'training' ? '#b54708' : '#027a48' }}>
-                  {trainingStatus.status === 'training' ? 'Training Models...' : trainingStatus.status === 'completed' ? 'Training Complete' : 'Training Failed'}
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Clock size={16} color="#344054" />
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1d1a' }}>Latest Training Run</span>
               </div>
               <span style={{ fontSize: 12, color: '#667085' }}>
-                {trainingStatus.models_completed}/{trainingStatus.total_models} models · {trainingStatus.elapsed_seconds}s
+                {new Date(lastTraining.trained_at).toLocaleString()}
               </span>
             </div>
-
-            {/* Progress Bar */}
-            <div style={{ padding: '12px 20px', borderBottom: '1px solid #f2f4f7' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 11, color: '#667085' }}>Progress</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#1a1d1a' }}>
-                  {Math.round((trainingStatus.models_completed / trainingStatus.total_models) * 100)}%
-                </span>
+            <div style={{ padding: '16px 20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#667085', marginBottom: 4 }}>Models Trained</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#1a1d1a' }}>
+                    {lastTraining.models_trained}<span style={{ fontSize: 14, fontWeight: 400, color: '#667085' }}>/6</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#667085', marginBottom: 4 }}>Ensemble MAPE</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: lastTraining.ensemble_mape < 10 ? '#027a48' : '#b54708' }}>
+                    {lastTraining.ensemble_mape != null ? `${lastTraining.ensemble_mape}%` : 'N/A'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#667085', marginBottom: 4 }}>SKUs Covered</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#1a1d1a' }}>
+                    {lastTraining.sku_count || 'N/A'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#667085', marginBottom: 4 }}>Training Time</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#1a1d1a' }}>
+                    {lastTraining.elapsed_seconds ? `${lastTraining.elapsed_seconds}s` : 'N/A'}
+                  </div>
+                </div>
               </div>
-              <div style={{ height: 6, backgroundColor: '#f2f4f7', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%',
-                  width: `${(trainingStatus.models_completed / trainingStatus.total_models) * 100}%`,
-                  backgroundColor: trainingStatus.status === 'training' ? '#e9730c' : '#10b149',
-                  borderRadius: 3,
-                  transition: 'width 0.5s ease',
-                }} />
-              </div>
-            </div>
 
-            {/* Per-Model Status */}
-            <div style={{ padding: '12px 20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {['xgboost', 'lightgbm', 'arima', 'sarima', 'prophet', 'holt_winters'].map((model) => {
-                  const info = trainingStatus.models?.[model];
-                  const status = info?.status || 'pending';
+              {/* Per-model breakdown */}
+              {lastTraining.per_model_metrics && (() => {
+                try {
+                  const perModel = JSON.parse(lastTraining.per_model_metrics);
                   return (
-                    <div key={model} style={{
-                      padding: '8px 12px', borderRadius: 8,
-                      border: `1px solid ${status === 'completed' ? '#a6f4c5' : status === 'failed' ? '#fecdca' : status === 'training' ? '#fedf89' : '#eaecf0'}`,
-                      backgroundColor: status === 'completed' ? '#ecfdf3' : status === 'failed' ? '#fef3f2' : status === 'training' ? '#fffaeb' : '#f9fafb',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'monospace', color: '#1a1d1a' }}>{model}</span>
-                        {status === 'completed' && <Check size={14} color="#027a48" />}
-                        {status === 'failed' && <XCircle size={14} color="#dc2626" />}
-                        {status === 'training' && <RefreshCw size={14} className="spin" color="#b54708" />}
+                    <div style={{ borderTop: '1px solid #f2f4f7', paddingTop: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#344054', marginBottom: 8 }}>Model Breakdown</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                        {Object.entries(perModel).map(([name, info]) => (
+                          <div key={name} style={{
+                            padding: '8px 12px', borderRadius: 8,
+                            border: `1px solid ${info.status === 'trained' ? '#a6f4c5' : '#fecdca'}`,
+                            backgroundColor: info.status === 'trained' ? '#ecfdf3' : '#fef3f2',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{name}</span>
+                              {info.status === 'trained' ? (
+                                <Check size={12} color="#027a48" />
+                              ) : (
+                                <XCircle size={12} color="#dc2626" />
+                              )}
+                            </div>
+                            {info.mape != null && (
+                              <div style={{ fontSize: 11, color: '#667085' }}>MAPE: {info.mape}%</div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                      {info?.elapsed_seconds > 0 && (
-                        <div style={{ fontSize: 10, color: '#667085' }}>{info.elapsed_seconds}s</div>
-                      )}
-                      {info?.metrics?.mape != null && (
-                        <div style={{ fontSize: 10, color: '#667085' }}>MAPE: {info.metrics.mape}%</div>
-                      )}
-                      {info?.error && (
-                        <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2, wordBreak: 'break-word' }}>{info.error}</div>
-                      )}
                     </div>
                   );
-                })}
+                } catch {
+                  return null;
+                }
+              })()}
+
+              {/* Weights */}
+              {lastTraining.weights && (() => {
+                try {
+                  const weights = JSON.parse(lastTraining.weights);
+                  const sorted = Object.entries(weights).sort((a, b) => b[1] - a[1]);
+                  return (
+                    <div style={{ borderTop: '1px solid #f2f4f7', paddingTop: 12, marginTop: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#344054', marginBottom: 8 }}>Ensemble Weights</div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {sorted.map(([name, weight]) => (
+                          <div key={name} style={{
+                            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+                            borderRadius: 6, backgroundColor: '#f9fafb', border: '1px solid #eaecf0',
+                          }}>
+                            <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}>{name}</span>
+                            <span style={{ fontSize: 11, color: '#667085' }}>{(weight * 100).toFixed(1)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                } catch {
+                  return null;
+                }
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* No Training Yet */}
+        {lastTraining && !lastTraining.has_training && !isTraining && (
+          <div style={{
+            padding: '16px 20px', borderRadius: 12, marginBottom: 20,
+            backgroundColor: '#fffaeb', border: '1px solid #fedf89',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <AlertTriangle size={20} color="#b54708" />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#b54708' }}>No forecasts yet</div>
+              <div style={{ fontSize: 13, color: '#92400e' }}>
+                Click the "Sync & Retrain" button above to generate your first set of forecasts.
               </div>
             </div>
-          </div>
-        )}
-
-        {/* SAP Mock ERP not running hint */}
-        {!mockStatus?.connected && (
-          <div style={{
-            padding: '12px 20px', borderRadius: 10, marginBottom: 20,
-            backgroundColor: '#eff8ff', border: '1px solid #b4cff5',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Server size={18} color="#175cd3" />
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#175cd3' }}>
-                Cloud Mode — Sync generates data from demand profiles (no SAP connection required).
-              </span>
-            </div>
-            <span style={{ fontSize: 11, color: '#667085', fontFamily: 'monospace' }}>
-              Data is simulated using historical patterns
-            </span>
-          </div>
-        )}
-
-        {/* SAP Mock ERP Quick Link */}
-        {mockStatus?.connected && (
-          <div style={{
-            padding: '12px 20px', borderRadius: 10, marginBottom: 20,
-            backgroundColor: '#ecfdf3', border: '1px solid #a6f4c5',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Zap size={18} color="#027a48" />
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#027a48' }}>
-                SAP Mock ERP is running on port 8001
-              </span>
-            </div>
-            <a
-              href="http://localhost:8001"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 4,
-                fontSize: 12, fontWeight: 600, color: '#027a48', textDecoration: 'none',
-              }}
-            >
-              Open SAP Console <ExternalLink size={12} />
-            </a>
-          </div>
-        )}
-
-        {/* Single Sync All Button */}
-        <div style={{
-          padding: '32px', borderRadius: 14, border: '1px solid #eaecf0', backgroundColor: '#fff',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)', textAlign: 'center', marginBottom: 24,
-        }}>
-          <Database size={40} color="#667085" style={{ marginBottom: 12 }} />
-          <h2 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 8px 0', color: '#1a1d1a' }}>
-            Sync All SAP Data
-          </h2>
-          <p style={{ fontSize: 13, color: '#667085', margin: '0 0 20px 0', maxWidth: 500, marginLeft: 'auto', marginRight: 'auto' }}>
-            Syncs Materials, Vendors, Stocks, Orders and Sales from SAP, then retrains ML models with UCB1 feedback loop.
-          </p>
-          <button
-            className="btn-primary"
-            style={{
-              padding: '14px 48px', fontSize: 16, fontWeight: 700, borderRadius: 10,
-              display: 'inline-flex', alignItems: 'center', gap: 10,
-            }}
-            onClick={() => syncAllMut.mutate()}
-            disabled={syncAllMut.isPending || !isConnected}
-          >
-            {syncAllMut.isPending ? (
-              <><RefreshCw size={18} className="spin" /> Syncing & Retraining...</>
-            ) : (
-              <><Play size={18} /> Sync All & Retrain</>
-            )}
-          </button>
-        </div>
-
-        {/* Debug Log Report */}
-        {debugLog && (
-          <div style={{
-            borderRadius: 14, border: '1px solid #eaecf0', backgroundColor: '#fff',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginBottom: 24, overflow: 'hidden',
-          }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 20px', borderBottom: '1px solid #eaecf0', backgroundColor: '#f9fafb',
-            }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1d1a' }}>Sync Debug Report</span>
-              <button
-                onClick={copyLog}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
-                  borderRadius: 6, border: '1px solid #eaecf0', backgroundColor: '#fff',
-                  cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#344054',
-                }}
-              >
-                {copied ? <><Check size={14} color="#027a48" /> Copied!</> : <><Copy size={14} /> Copy Log</>}
-              </button>
-            </div>
-            <pre style={{
-              margin: 0, padding: '16px 20px', fontSize: 12, fontFamily: 'monospace',
-              lineHeight: 1.6, backgroundColor: '#1e1e1e', color: '#d4d4d4',
-              overflowX: 'auto', maxHeight: 300, overflowY: 'auto',
-            }}>
-              {debugLog}
-            </pre>
           </div>
         )}
 
         {/* Sync Operations Log */}
         <div className="card-table-container">
           <div className="table-card-header">
-            <div className="table-card-title">Sync Operations Log</div>
+            <div className="table-card-title">Recent Sync Operations</div>
           </div>
-
           <table className="data-table">
             <thead>
               <tr>
-                <th>Module</th>
                 <th>Status</th>
-                <th>Records</th>
+                <th>Records Synced</th>
+                <th>Modules</th>
                 <th>Started</th>
                 <th>Completed</th>
                 <th>Error</th>
@@ -429,20 +458,31 @@ export default function SapSync({ onMenuToggle }) {
               {(status?.recent_logs || []).length === 0 && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: 30, color: '#667085' }}>
-                    No sync operations executed yet
+                    No operations yet. Click "Sync & Retrain" to get started.
                   </td>
                 </tr>
               )}
               {(status?.recent_logs || []).map((log) => (
                 <tr key={log.id}>
-                  <td style={{ fontWeight: 700 }}>{log.sync_type}</td>
                   <td>
-                    {log.status === 'completed' ? <span className="badge-pill badge-healthy">Completed</span> : <span className="badge-pill badge-low">In Progress</span>}
+                    {log.status === 'completed' ? <span className="badge-pill badge-healthy">Completed</span> :
+                     log.status === 'partial' ? <span className="badge-pill badge-low" style={{ backgroundColor: '#fef3f2', color: '#dc2626' }}>Partial</span> :
+                     log.status === 'failed' ? <span className="badge-pill badge-low" style={{ backgroundColor: '#fef3f2', color: '#dc2626' }}>Failed</span> :
+                     <span className="badge-pill badge-low">Running</span>}
                   </td>
-                  <td style={{ fontWeight: 600 }}>{log.records_synced}</td>
-                  <td style={{ color: '#667085' }}>{new Date(log.started_at).toLocaleString()}</td>
-                  <td style={{ color: '#667085' }}>{log.completed_at ? new Date(log.completed_at).toLocaleString() : '—'}</td>
-                  <td style={{ color: '#d32f2f' }}>{log.error_message || '—'}</td>
+                  <td style={{ fontWeight: 600 }}>{log.records_synced.toLocaleString()}</td>
+                  <td style={{ fontSize: 11, color: '#667085' }}>
+                    {(log.modules_synced || []).join(', ')}
+                  </td>
+                  <td style={{ color: '#667085', fontSize: 11 }}>
+                    {log.started_at ? new Date(log.started_at).toLocaleString() : '—'}
+                  </td>
+                  <td style={{ color: '#667085', fontSize: 11 }}>
+                    {log.completed_at ? new Date(log.completed_at).toLocaleString() : '—'}
+                  </td>
+                  <td style={{ color: '#d32f2f', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {log.error_message || '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>

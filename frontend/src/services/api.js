@@ -63,6 +63,11 @@ export const checkSapMockStatus = () => api.get('/sap/mock-status');
 export const syncSalesOnly = () => api.post('/sap/sync/sales');
 export const syncAll = () =>
   api.post('/sap/sync-and-retrain?retrain=true', null, { timeout: 900000 });
+export const syncAndRetrain = () =>
+  api.post('/sap/sync-and-retrain?retrain=true', null, { timeout: 900000 });
+export const syncOnlyNoTrain = () =>
+  api.post('/sap/sync-and-retrain?retrain=false', null, { timeout: 30000 });
+export const getLastTrainingInfo = () => api.get('/sap/last-training-info');
 
 // ─── Demand Forecasting ─────────────────────────────────────────────
 export const trainForecastModels = (params) => api.post('/forecast/train', null, { params });

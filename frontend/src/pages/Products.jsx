@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getProducts, createProduct, updateProduct, deleteProduct, getCategories } from '../services/api';
+import { getProducts, createProduct, updateProduct, deleteProduct, getCategories, getStockoutRisk } from '../services/api';
 import Header from '../components/Header';
 import { Box, Layers, CheckCircle2, AlertTriangle, XCircle, Search, Plus, Eye, Pencil, Trash2, ArrowLeft, Package, Wrench, Droplets, Cog, Cpu, Settings2 } from 'lucide-react';
 
@@ -99,7 +99,20 @@ export default function Products({ onMenuToggle }) {
 
   const allProducts = allProductsData?.items || [];
 
-  // Category-aware stock thresholds: below low = Critical, below medium = Low, else Healthy
+  // Fetch forecast-based stockout risk (same data source as Dashboard)
+  const { data: riskData } = useQuery({
+    queryKey: ['stockout-risk'],
+    queryFn: () => getStockoutRisk({ weeks_ahead: 12 }).then(r => r.data),
+  });
+
+  // Build risk lookup: { sku_id -> { risk_level, coverage_weeks, forecast_weekly, ... } }
+  const riskMap = useMemo(() => {
+    const map = {};
+    (riskData?.risks || []).forEach(r => { map[r.sku_id] = r; });
+    return map;
+  }, [riskData]);
+
+  // Fallback static thresholds for SKUs without forecast data
   const STOCK_THRESHOLDS = {
     'Spare Parts':          { low: 200, medium: 500 },
     'Lubricants':           { low: 150, medium: 400 },
@@ -107,23 +120,32 @@ export default function Products({ onMenuToggle }) {
     'Engines':              { low: 5,   medium: 15 },
     'Precision Components': { low: 10,  medium: 25 },
   };
-
   const getThresholds = (category) => STOCK_THRESHOLDS[category] || { low: 50, medium: 200 };
 
-  // Status classification based on actual inventory (current_stock) with category-aware thresholds
+  // Forecast-based risk classification (matches Dashboard logic)
+  const getRiskLevel = (p) => {
+    const risk = riskMap[p.sku_id];
+    if (risk) return risk.risk_level;
+    // Fallback: static thresholds for SKUs without forecast data
+    const stock = p.current_stock || 0;
+    const t = getThresholds(p.category);
+    if (stock < t.low) return 'CRITICAL';
+    if (stock < t.medium) return 'HIGH';
+    return 'LOW';
+  };
+
   const statusMap = {
     Healthy: (p) => {
-      const t = getThresholds(p.category);
-      return (p.current_stock || 0) >= t.medium;
+      const level = getRiskLevel(p);
+      return level === 'LOW';
     },
     Low: (p) => {
-      const t = getThresholds(p.category);
-      const stock = p.current_stock || 0;
-      return stock >= t.low && stock < t.medium;
+      const level = getRiskLevel(p);
+      return level === 'MEDIUM' || level === 'HIGH';
     },
     Critical: (p) => {
-      const t = getThresholds(p.category);
-      return (p.current_stock || 0) < t.low;
+      const level = getRiskLevel(p);
+      return level === 'CRITICAL';
     },
   };
 
@@ -198,17 +220,19 @@ export default function Products({ onMenuToggle }) {
     return 'badge-precision';
   };
 
-  const getStockColor = (category, qty) => {
-    const t = getThresholds(category);
-    if (qty < t.low) return '#dc2626';
-    if (qty < t.medium) return '#d97706';
+  const getStockColor = (p) => {
+    const level = getRiskLevel(p);
+    if (level === 'CRITICAL') return '#dc2626';
+    if (level === 'HIGH') return '#d97706';
+    if (level === 'MEDIUM') return '#2563eb';
     return '#16a34a';
   };
 
-  const getStockBadge = (category, qty) => {
-    const t = getThresholds(category);
-    if (qty < t.low) return <span className="badge-pill badge-critical">Low</span>;
-    if (qty < t.medium) return <span className="badge-pill badge-low">Medium</span>;
+  const getStockBadge = (p) => {
+    const level = getRiskLevel(p);
+    if (level === 'CRITICAL') return <span className="badge-pill badge-critical">Critical</span>;
+    if (level === 'HIGH') return <span className="badge-pill badge-low">High Risk</span>;
+    if (level === 'MEDIUM') return <span className="badge-pill badge-low" style={{ backgroundColor: '#eff8ff', color: '#175cd3' }}>Medium</span>;
     return <span className="badge-pill badge-healthy">Healthy</span>;
   };
 
@@ -281,6 +305,7 @@ export default function Products({ onMenuToggle }) {
                 <div>
                   <div className="kpi-label">Healthy Stock</div>
                   <div className="kpi-value kpi-value-green">{healthyCount}</div>
+                  <div className="kpi-sub" style={{ fontSize: 11, color: '#667085' }}>8+ weeks coverage</div>
                 </div>
               </div>
 
@@ -289,8 +314,9 @@ export default function Products({ onMenuToggle }) {
                   <AlertTriangle size={22} />
                 </div>
                 <div>
-                  <div className="kpi-label">Low Stock</div>
+                  <div className="kpi-label">At Risk</div>
                   <div className="kpi-value kpi-value-orange">{lowCriticalCount}</div>
+                  <div className="kpi-sub" style={{ fontSize: 11, color: '#667085' }}>4-8 weeks coverage</div>
                 </div>
               </div>
 
@@ -301,6 +327,7 @@ export default function Products({ onMenuToggle }) {
                 <div>
                   <div className="kpi-label">Critical</div>
                   <div className="kpi-value kpi-value-red">{criticalCount}</div>
+                  <div className="kpi-sub" style={{ fontSize: 11, color: '#667085' }}>&lt;4 weeks coverage</div>
                 </div>
               </div>
             </div>
@@ -326,10 +353,10 @@ export default function Products({ onMenuToggle }) {
                 </select>
 
                 <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
-                  <option value="">All Statuses</option>
-                  <option value="Healthy">Healthy</option>
-                  <option value="Low">Low Stock</option>
-                  <option value="Critical">Critical</option>
+                  <option value="">All Risk Levels</option>
+                  <option value="Healthy">Healthy (8+ wk)</option>
+                  <option value="Low">At Risk (4-8 wk)</option>
+                  <option value="Critical">Critical (&lt;4 wk)</option>
                 </select>
               </div>
 
@@ -384,10 +411,10 @@ export default function Products({ onMenuToggle }) {
                         <td style={{ color: '#64748b', fontFamily: 'monospace' }}>
                           {p.unit_volume_m3 != null ? p.unit_volume_m3.toFixed(4) : '—'}
                         </td>
-                        <td style={{ fontWeight: 600, fontFamily: 'monospace', color: getStockColor(p.category, p.current_stock || 0) }}>
+                        <td style={{ fontWeight: 600, fontFamily: 'monospace', color: getStockColor(p) }}>
                           {p.current_stock != null ? p.current_stock.toLocaleString('en-IN') : '—'}
                         </td>
-                        <td>{getStockBadge(p.category, p.current_stock || 0)}</td>
+                        <td>{getStockBadge(p)}</td>
                         <td>
                           <div className="action-buttons">
                             <button className="act-btn act-view"><Eye size={13} /> View</button>

@@ -85,7 +85,7 @@ class MockSAPConnector(SAPConnector):
                 matnr = mat.get("MATNR", "")
                 existing = db.query(Product).filter(Product.sku_id == matnr).first()
                 if existing:
-                    existing.last_synced_at = datetime.utcnow()
+                    existing.last_synced_at = datetime.now()
                     count += 1
                 else:
                     product = Product(
@@ -94,7 +94,7 @@ class MockSAPConnector(SAPConnector):
                         sub_category=mat.get("sub_category", ""),
                         machine_compatibility=mat.get("MAKTX", ""),
                         sap_material_id=matnr,
-                        last_synced_at=datetime.utcnow(),
+                        last_synced_at=datetime.now(),
                     )
                     db.add(product)
                     count += 1
@@ -133,14 +133,14 @@ class MockSAPConnector(SAPConnector):
                     inv.quantity_on_hand = on_hand
                     inv.quantity_reserved = reserved
                     inv.quantity_available = on_hand - reserved
-                    inv.last_sap_sync_at = datetime.utcnow()
+                    inv.last_sap_sync_at = datetime.now()
                 else:
                     inv = Inventory(
                         sku_id=matnr,
                         quantity_on_hand=on_hand,
                         quantity_reserved=reserved,
                         quantity_available=on_hand - reserved,
-                        last_sap_sync_at=datetime.utcnow(),
+                        last_sap_sync_at=datetime.now(),
                     )
                     db.add(inv)
                 count += 1
@@ -261,7 +261,7 @@ class RFCConnector(SAPConnector):
                     sap_id = fields[0].strip()
                     existing = db.query(Product).filter(Product.sap_material_id == sap_id).first()
                     if existing:
-                        existing.last_synced_at = datetime.utcnow()
+                        existing.last_synced_at = datetime.now()
                     count += 1
             db.commit()
             return count

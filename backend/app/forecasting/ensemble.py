@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.forecasting import training_progress as progress
 
@@ -249,6 +250,203 @@ class AdaptiveEnsemble:
         elapsed = (datetime.now() - start_time).total_seconds()
 
         # Save training record
+        def _per_model_snapshot(res: dict) -> dict:
+            snap = {}
+            for model_name, r in res.items():
+                tm = r.get("test_metrics", {}) or {}
+                snap[model_name] = {
+                    "status": r.get("status"),
+                    "mae": tm.get("mae"),
+                    "mape": tm.get("mape"),
+                    "rmse": tm.get("rmse"),
+                    "smape": tm.get("smape"),
+                    "bias": tm.get("bias"),
+                }
+            return snap
+
+        training_record = {
+            "date": datetime.now().isoformat(),
+            "sku_id": sku_id,
+            "category": category,
+            "elapsed_seconds": round(elapsed, 1),
+            "models_trained": models_trained_count,
+            "ensemble_mape": ensemble_metrics.get("mape"),
+            "weights": self.weights.copy(),
+            "per_model": _per_model_snapshot(results),
+            "dataset": {
+                "train_rows": dataset["train_rows"],
+                "test_rows": dataset["test_rows"],
+                "split_date": str(dataset.get("split_date", "")),
+                "n_features": len(feature_cols),
+                "sku_count": len(sku_ids),
+            },
+        }
+        self.training_history.append(training_record)
+        self.is_trained = True
+        self._save_history()
+
+        return {
+            "models": results,
+            "ensemble": ensemble_metrics,
+            "weights": self.weights,
+            "metadata": {
+                "elapsed_seconds": round(elapsed, 1),
+                "train_rows": dataset["train_rows"],
+                "test_rows": dataset["test_rows"],
+                "split_date": dataset["split_date"],
+                "n_features": len(feature_cols),
+                "sku_count": len(sku_ids),
+            },
+        }
+
+    def train_all_models_parallel(
+        self,
+        sku_id: str = None,
+        category: str = None,
+        test_weeks: int = 12,
+        max_workers: int = 4,
+    ) -> dict:
+        """
+        Train all 6 models in parallel using ThreadPoolExecutor.
+        ML models share the dataset; TS models each prepare their own data.
+        Returns the same shape as train_all_models().
+        """
+        start_time = datetime.now()
+        results = {}
+
+        try:
+            dataset = prepare_dataset(sku_id=sku_id, category=category, test_weeks=test_weeks)
+        except Exception as e:
+            return {"error": f"Data preparation failed: {str(e)}"}
+
+        train_df = dataset["train"]
+        test_df = dataset["test"]
+        feature_cols = dataset["feature_cols"]
+        sku_ids = dataset["sku_ids"]
+
+        X_train = train_df[feature_cols].values
+        y_train = train_df["target"].values
+        X_test = test_df[feature_cols].values
+        y_test = test_df["target"].values
+
+        X_train_df = pd.DataFrame(X_train, columns=feature_cols)
+        X_test_df = pd.DataFrame(X_test, columns=feature_cols)
+
+        all_test_preds = {}
+        representative_sku = sku_id or (sku_ids[0] if sku_ids else None)
+
+        def train_one_ml(model_name):
+            progress.begin_model(model_name)
+            try:
+                model = get_all_models()[model_name]
+                model.train(X_train_df, pd.Series(y_train))
+                preds = model.predict(X_test_df)
+                metrics = compute_all_metrics(y_test, preds)
+                model.save(sku_id or category or "global")
+                progress.complete_model(model_name, metrics={"mape": metrics["mape"], "mae": metrics["mae"], "rmse": metrics["rmse"]})
+                return model_name, {
+                    "status": "trained",
+                    "test_metrics": metrics,
+                    "predictions": preds,
+                    "_model": model,
+                }
+            except Exception as e:
+                logger.error(f"{model_name} training failed: {e}")
+                progress.complete_model(model_name, error=str(e))
+                return model_name, {"status": "failed", "error": str(e)}
+
+        def train_one_ts(model_name):
+            progress.begin_model(model_name)
+            try:
+                ts_data = prepare_timeseries_for_sku(representative_sku)
+                ts_values = ts_data["Units_Sold"]
+                ts_train = ts_values.iloc[:-test_weeks] if len(ts_values) > test_weeks else ts_values
+                ts_actual = ts_values.iloc[-test_weeks:].values if len(ts_values) > test_weeks else ts_values.values
+
+                model = get_all_models()[model_name]
+                model.train(pd.DataFrame(), ts_train, ts=ts_train, dates=ts_data.index[:len(ts_train)])
+
+                if not model.is_trained:
+                    err = f"{model_name} training returned untrained model"
+                    progress.complete_model(model_name, error=err)
+                    return model_name, {"status": "failed", "error": err}
+
+                horizon = min(test_weeks, len(ts_actual))
+                preds = model.predict(horizon=horizon)
+                if len(preds) > len(ts_actual):
+                    preds = preds[:len(ts_actual)]
+
+                metrics = compute_all_metrics(ts_actual[:len(preds)], preds)
+                model.save(representative_sku)
+                progress.complete_model(model_name, metrics={"mape": metrics.get("mape", 0), "mae": metrics.get("mae", 0), "rmse": metrics.get("rmse", 0)})
+                return model_name, {
+                    "status": "trained",
+                    "test_metrics": metrics,
+                    "predictions": preds,
+                    "_model": model,
+                }
+            except Exception as e:
+                logger.error(f"{model_name} training failed: {e}")
+                progress.complete_model(model_name, error=str(e))
+                return model_name, {"status": "failed", "error": str(e)}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for name in self.ML_MODELS:
+                futures[executor.submit(train_one_ml, name)] = name
+            if representative_sku:
+                for name in self.TS_MODELS:
+                    futures[executor.submit(train_one_ts, name)] = name
+
+            for future in as_completed(futures):
+                model_name, result = future.result()
+                results[model_name] = result
+                if result.get("status") == "trained":
+                    if "predictions" in result:
+                        all_test_preds[model_name] = result.pop("predictions")
+                    trained_model = result.pop("_model", None)
+                    if trained_model and getattr(trained_model, "is_trained", False):
+                        self.models[model_name] = trained_model
+
+        models_trained_count = sum(1 for r in results.values() if r.get("status") == "trained")
+
+        if models_trained_count == 0:
+            elapsed = (datetime.now() - start_time).total_seconds()
+            self.training_history.append({
+                "date": datetime.now().isoformat(),
+                "sku_id": sku_id,
+                "category": category,
+                "elapsed_seconds": round(elapsed, 1),
+                "models_trained": 0,
+                "ensemble_mape": None,
+                "weights": self.weights.copy(),
+                "per_model": {
+                    name: {"status": r.get("status"), "error": r.get("error")}
+                    for name, r in results.items()
+                },
+                "error": "All models failed",
+            })
+            self._save_history()
+            return {
+                "models": results,
+                "ensemble": {"status": "all_failed", "error": "All 6 models failed to train."},
+                "weights": self.weights,
+                "metadata": {
+                    "elapsed_seconds": round(elapsed, 1),
+                    "train_rows": dataset.get("train_rows", 0),
+                    "test_rows": dataset.get("test_rows", 0),
+                    "split_date": dataset.get("split_date", ""),
+                    "n_features": len(feature_cols),
+                    "sku_count": len(sku_ids),
+                    "models_trained": 0,
+                },
+                "error": "All models failed to train.",
+            }
+
+        self._compute_weights(results)
+        ensemble_metrics = self._compute_ensemble_metrics(all_test_preds, y_test, test_df)
+        elapsed = (datetime.now() - start_time).total_seconds()
+
         def _per_model_snapshot(res: dict) -> dict:
             snap = {}
             for model_name, r in res.items():

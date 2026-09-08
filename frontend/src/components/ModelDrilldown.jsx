@@ -5,7 +5,7 @@ import {
   CartesianGrid, ReferenceLine,
 } from 'recharts';
 import { Activity, TrendingDown, TrendingUp, Database, Award, Layers, RefreshCw } from 'lucide-react';
-import { getTrainingHistory } from '../services/api';
+import { getTrainingHistory, getTrainingStatus } from '../services/api';
 
 const MODEL_ORDER = ['xgboost', 'lightgbm', 'arima', 'sarima', 'prophet', 'holt_winters'];
 const MODEL_META = {
@@ -45,9 +45,17 @@ function DeltaBadge({ value, suffix = '', invert = false }) {
 export default function ModelDrilldown() {
   const [selectedIdx, setSelectedIdx] = useState(null);
 
-  const { data, isLoading } = useQuery({
+  const { data: trainingStatus } = useQuery({
+    queryKey: ['training-status'],
+    queryFn: () => getTrainingStatus().then(r => r.data),
+    refetchInterval: 3000,
+  });
+  const isTraining = trainingStatus?.status === 'training';
+
+  const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['training-history'],
     queryFn: () => getTrainingHistory({ limit: 50 }).then(r => r.data),
+    refetchInterval: isTraining ? 5000 : 15000,
   });
 
   const runs = data?.runs || [];
@@ -119,6 +127,29 @@ export default function ModelDrilldown() {
             <span style={{ fontSize: 12, color: '#667085', fontWeight: 400 }}>
               — {data.total_runs} runs recorded · click a row to drill down
             </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isTraining && (
+              <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#2563eb', animation: 'pulse 1.5s infinite' }} />
+                Training in progress
+              </span>
+            )}
+            {isFetching && !isLoading && (
+              <RefreshCw size={12} className="spin" color="#667085" />
+            )}
+            <button
+              onClick={() => refetch()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+                borderRadius: 6, border: '1px solid #eaecf0', backgroundColor: '#fff',
+                cursor: 'pointer', fontSize: 11, color: '#344054',
+              }}
+              title="Refresh training history"
+            >
+              <RefreshCw size={12} />
+              Refresh
+            </button>
           </div>
         </div>
         <div style={{ maxHeight: 260, overflowY: 'auto' }}>
@@ -340,7 +371,11 @@ export default function ModelDrilldown() {
                 </tr>
               </thead>
               <tbody>
-                {MODEL_ORDER.map(m => {
+                {[...MODEL_ORDER].sort((a, b) => {
+                  const aMape = pm[a]?.mape ?? Infinity;
+                  const bMape = pm[b]?.mape ?? Infinity;
+                  return aMape - bMape;
+                }).map(m => {
                   const info = pm[m] || { status: 'not_run' };
                   const meta = MODEL_META[m];
                   let verdict = <span style={{ color: '#98a2b3', fontSize: 11 }}>No history</span>;

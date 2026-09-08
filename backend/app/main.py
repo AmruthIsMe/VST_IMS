@@ -36,7 +36,7 @@ def _seed_demo_users():
             {"user_id": "USR-003", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
         ]
         hashed = "vst2026"
-        now = datetime.utcnow()
+        now = datetime.now()
         for du in demo_users:
             user = db.query(User).filter(
                 (User.user_id.ilike(du["user_id"])) | (User.email.ilike(du["email"]))
@@ -44,6 +44,7 @@ def _seed_demo_users():
             if user:
                 user.user_id = du["user_id"]
                 user.name = du["name"]
+                user.email = du["email"]
                 user.role = du["role"]
                 user.password_hash = hashed
                 user.status = "Active"

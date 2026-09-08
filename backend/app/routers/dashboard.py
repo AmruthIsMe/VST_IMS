@@ -425,12 +425,16 @@ def demand_trend(months: int = None, start_date: str = None, end_date: str = Non
         labels = [k for k, _ in sorted_m]
         values = [v for _, v in sorted_m]
     else:  # weekly (default)
+        from datetime import date as _date
+        today = _date.today()
+        current_week_monday = today - timedelta(days=today.weekday())
         weekly_map = {}
         for d, u in rows:
             dt = d.date() if hasattr(d, "date") else d
             w = dt - timedelta(days=dt.weekday())
             weekly_map[w] = weekly_map.get(w, 0) + int(u or 0)
         sorted_w = sorted(weekly_map.items())
+        sorted_w = [(k, v) for k, v in sorted_w if k <= current_week_monday]
         if months is not None and 0 < months <= 6:
             labels = [k.strftime("%b %d") for k, _ in sorted_w]
         else:

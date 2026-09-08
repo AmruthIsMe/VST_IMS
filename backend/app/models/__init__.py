@@ -22,8 +22,8 @@ class Product(Base):
     criticality_score = Column(Float)
     sap_material_id = Column(String(50), unique=True, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     unit_cost_inr = Column(Float)
 
     sales = relationship("Sale", back_populates="product")
@@ -47,8 +47,8 @@ class Supplier(Base):
     address = Column(Text)
     sap_vendor_id = Column(String(50), unique=True, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class User(Base):
@@ -62,8 +62,8 @@ class User(Base):
     role = Column(String(50), nullable=False, default="Viewer")
     status = Column(String(20), nullable=False, default="Active")
     last_login = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class Order(Base):
@@ -81,8 +81,8 @@ class Order(Base):
     sap_po_number = Column(String(50), unique=True, nullable=True)
     fulfillment_region = Column(String(100), nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
@@ -111,7 +111,7 @@ class Sale(Base):
     units_sold = Column(Integer, nullable=False)
     fulfillment_region = Column(String(100))
     stockout_flag = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     product = relationship("Product", back_populates="sales")
 
@@ -144,7 +144,7 @@ class Forecast(Base):
     predicted_demand = Column(Float, nullable=False)
     actual_demand = Column(Float, nullable=True)
     model_version = Column(String(50))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     product = relationship("Product", back_populates="forecast")
 
@@ -164,7 +164,7 @@ class SapSyncLog(Base):
     started_at = Column(DateTime, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     detail_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class SapConfig(Base):
@@ -179,7 +179,7 @@ class SapConfig(Base):
     language = Column(String(10), default="EN")
     is_active = Column(Boolean, default=False)
     last_sync_at = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class ForecastModel(Base):
@@ -190,7 +190,7 @@ class ForecastModel(Base):
     model_type = Column(String(50), nullable=False)
     sku_id = Column(String(50), nullable=True)
     category = Column(String(100), nullable=True)
-    trained_at = Column(DateTime, default=datetime.utcnow)
+    trained_at = Column(DateTime, default=datetime.now)
     mae = Column(Float, nullable=True)
     mape = Column(Float, nullable=True)
     rmse = Column(Float, nullable=True)
@@ -212,7 +212,7 @@ class ForecastPrediction(Base):
     lower_bound = Column(Float, nullable=True)
     upper_bound = Column(Float, nullable=True)
     actual_demand = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class GenieConversation(Base):
@@ -221,8 +221,8 @@ class GenieConversation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(String(100), unique=True, nullable=False, index=True)
     title = Column(String(200), default="New Conversation")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class GenieMessage(Base):
@@ -235,7 +235,7 @@ class GenieMessage(Base):
     intent = Column(String(50), nullable=True)
     confidence_level = Column(String(20), nullable=True)
     confidence_tag = Column(String(50), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class Inventory(Base):
@@ -248,8 +248,24 @@ class Inventory(Base):
     quantity_available = Column(Integer, nullable=False, default=0)
     unit_cost_inr = Column(Float, nullable=True)
     last_sap_sync_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     product = relationship("Product", foreign_keys=[sku_id], primaryjoin="Inventory.sku_id == Product.sku_id")
+
+
+class TrainingRun(Base):
+    __tablename__ = "training_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    trained_at = Column(DateTime, nullable=False, default=datetime.now)
+    trained_on = Column(String(20), nullable=False, default="local")
+    elapsed_seconds = Column(Float, nullable=True)
+    models_trained = Column(Integer, nullable=True)
+    ensemble_mape = Column(Float, nullable=True)
+    sku_count = Column(Integer, nullable=True)
+    predictions_uploaded = Column(Integer, nullable=True)
+    trigger = Column(String(20), nullable=True, default="manual")
+    weights = Column(Text, nullable=True)
+    per_model_metrics = Column(Text, nullable=True)
 

@@ -42,6 +42,21 @@ def _decode_token(token: str) -> Optional[dict]:
 
 def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> dict:
     """Dependency that enforces JWT auth on protected endpoints."""
+    # ── AUTH TOGGLE: Set AUTH_ENABLED = True in config.py to restore normal auth ──
+    from app.config import get_settings as _gs
+    _s = _gs()
+    if not getattr(_s, "AUTH_ENABLED", True):
+        return {
+            "user_id": "admin",
+            "name": "Dev User",
+            "email": "dev@vst.com",
+            "role": "Admin",
+            "status": "Active",
+            "db_id": "00000000-0000-0000-0000-000000000000",
+            "last_login": None,
+        }
+    # ── END AUTH TOGGLE ──
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -76,6 +91,7 @@ DEMO_ACCOUNTS = {
     "usr-002": {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
     "usr-003": {"user_id": "USR-003", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
     "admin@vst.com": {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+    "manager@vst.com": {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
     "amit.verma@vst.com": {"user_id": "USR-001", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
     "priya.s@vst.com": {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
 }
@@ -139,7 +155,7 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     else:
         if is_demo and demo_meta:
             logger.info(f"Auto-provisioning demo user '{demo_meta['user_id']}' on login")
-            now = datetime.utcnow()
+            now = datetime.now()
             user = User(
                 id=uuid.uuid4(),
                 user_id=demo_meta["user_id"],
@@ -171,7 +187,7 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     try:
         db.execute(
             text("UPDATE users SET last_login = :now WHERE user_id = :uid"),
-            {"now": datetime.utcnow(), "uid": user_id_val},
+            {"now": datetime.now(), "uid": user_id_val},
         )
         db.commit()
     except Exception as e:
