@@ -1,30 +1,30 @@
-Supplier_ID,Origin_Country,Primary_Category,Base_Lead_Time_Days,Lead_Time_Volatility,Minimum_Order_Quantity,Unit_Cost_INR
-SUP-JP-001,Japan,Precision Components,52,0.165,11,62750.65
-SUP-JP-002,Japan,Precision Components,53,0.17,27,59886.09
-SUP-JP-003,Japan,Engines,56,0.197,7,148228.36
-SUP-JP-004,Japan,Engines,85,0.188,6,149671.23
-SUP-JP-005,Japan,Precision Components,75,0.228,16,39841.13
-SUP-JP-006,Japan,Precision Components,49,0.24,27,53188.7
-SUP-CN-007,China,Electric Pumps,53,0.341,25,15487.37
-SUP-CN-008,China,Spare Parts,31,0.496,88,1472.31
-SUP-CN-009,China,Spare Parts,72,0.379,83,719.97
-SUP-CN-010,China,Electric Pumps,58,0.416,23,12991.24
-SUP-CN-011,China,Spare Parts,56,0.394,81,489.88
-SUP-CN-012,China,Spare Parts,47,0.379,43,426.2
-SUP-CN-013,China,Spare Parts,44,0.368,151,1915.21
-SUP-CN-014,China,Electric Pumps,41,0.32,39,17906.23
-SUP-CN-015,China,Electric Pumps,45,0.34,27,5669.48
-SUP-DE-016,Germany,Precision Components,91,0.147,8,25012.19
-SUP-DE-017,Germany,Precision Components,62,0.148,11,72254.93
-SUP-DE-018,Germany,Precision Components,99,0.15,11,14971.71
-SUP-DE-019,Germany,Precision Components,75,0.129,12,59124.24
-SUP-IN-020,India,Spare Parts,28,0.14,198,2458.56
-SUP-IN-021,India,Lubricants,15,0.057,474,379.13
-SUP-IN-022,India,Spare Parts,14,0.105,37,2137.62
-SUP-IN-023,India,Lubricants,24,0.104,86,414.9
-SUP-IN-024,India,Spare Parts,13,0.066,174,1522.94
-SUP-IN-025,India,Lubricants,19,0.08,426,682.63
-SUP-IN-026,India,Spare Parts,16,0.126,159,636.01
-SUP-IN-027,India,Lubricants,21,0.062,377,1364.96
-SUP-IN-028,India,Spare Parts,9,0.076,173,571.81
-SUP-IN-029,India,Spare Parts,22,0.095,179,726.36
+Supplier_ID,Supplier_Name,Origin_Country,Primary_Category,Base_Lead_Time_Days,Lead_Time_Volatility,Minimum_Order_Quantity,Unit_Cost_INR,Email,Phone
+SUP-JP-001,Nippon Precision Co.,Japan,Precision Components,52,0.165,11,62750.65,info@nipponprecision.co.jp,+81-3-5555-0101
+SUP-JP-002,Tokyo Engine Works,Japan,Precision Components,53,0.17,27,59886.09,sales@tokyoengineworks.jp,+81-3-5555-0202
+SUP-JP-003,Osaka Motor Corp.,Japan,Engines,56,0.197,7,148228.36,orders@osakamotor.jp,+81-6-6666-0303
+SUP-JP-004,Kobe Heavy Industries,Japan,Engines,85,0.188,6,149671.23,contact@kobeheavy.jp,+81-78-7777-0404
+SUP-JP-005,Nagoya Tech Parts,Japan,Precision Components,75,0.228,16,39841.13,info@nagoyatech.jp,+81-52-8888-0505
+SUP-JP-006,Fukuoka Precision Ltd,Japan,Precision Components,49,0.24,27,53188.7,support@fukuokaprecision.jp,+81-92-9999-0606
+SUP-CN-007,Shanghai Pump Works,China,Electric Pumps,53,0.341,25,15487.37,sales@shanghaipump.cn,+86-21-6666-0707
+SUP-CN-008,Guangdong Spare Parts Ltd,China,Spare Parts,31,0.496,88,1472.31,contact@gd-spare.cn,+86-20-7777-0808
+SUP-CN-009,Shenzhen Components Co.,China,Spare Parts,72,0.379,83,719.97,orders@szcomponents.cn,+86-755-8888-0909
+SUP-CN-010,Beijing Electric Systems,China,Electric Pumps,58,0.416,23,12991.24,info@bj-electric.cn,+86-10-9999-1010
+SUP-CN-011,Zhejiang Industrial Supply,China,Spare Parts,56,0.394,81,489.88,sales@zj-industrial.cn,+86-571-1111-1111
+SUP-CN-012,Hebei Metal Works,China,Spare Parts,47,0.379,43,426.2,contact@hebeimetal.cn,+86-311-2222-1212
+SUP-CN-013,Jiangsu Parts Mfg.,China,Spare Parts,44,0.368,151,1915.21,info@js-parts.cn,+86-25-3333-1313
+SUP-CN-014,Guangzhou Pump Tech,China,Electric Pumps,41,0.32,39,17906.23,sales@gz-pump.cn,+86-20-4444-1414
+SUP-CN-015,Fujian Pump Industries,China,Electric Pumps,45,0.34,27,5669.48,orders@fj-pump.cn,+86-591-5555-1515
+SUP-DE-016,Bavarian Precision GmbH,Germany,Precision Components,91,0.147,8,25012.19,info@bavarianprecision.de,+49-89-6666-1616
+SUP-DE-017,Munich Engineering AG,Germany,Precision Components,62,0.148,11,72254.93,sales@municheng.de,+49-89-7777-1717
+SUP-DE-018,Berlin Tech Systems,Germany,Precision Components,99,0.15,11,14971.71,contact@berlintech.de,+49-30-8888-1818
+SUP-DE-019,Hamburg Industrial Parts,Germany,Precision Components,75,0.129,12,59124.24,info@hamburg-parts.de,+49-40-9999-1919
+SUP-IN-020,Bengaluru Spare Co.,India,Spare Parts,28,0.14,198,2458.56,sales@bengaluruspare.in,+91-80-2222-2020
+SUP-IN-021,Chennai Lubricants Pvt Ltd,India,Lubricants,15,0.057,474,379.13,orders@chennailube.in,+91-44-3333-2121
+SUP-IN-022,Hyderabad Auto Parts,India,Spare Parts,14,0.105,37,2137.62,info@hydauto.in,+91-40-4444-2222
+SUP-IN-023,Pune Lubricant Supply,India,Lubricants,24,0.104,86,414.9,contact@pune-lube.in,+91-20-5555-2323
+SUP-IN-024,Mumbai Industrial Parts,India,Spare Parts,13,0.066,174,1522.94,sales@mumbai-parts.in,+91-22-6666-2424
+SUP-IN-025,Kolkata Lube Dist.,India,Lubricants,19,0.08,426,682.63,info@kolkatalube.in,+91-33-7777-2525
+SUP-IN-026,Delhi Mechanical Supply,India,Spare Parts,16,0.126,159,636.01,orders@delhimech.in,+91-11-8888-2626
+SUP-IN-027,Ahmedabad Lube Co.,India,Lubricants,21,0.062,377,1364.96,sales@ahmedabadlube.in,+91-79-9999-2727
+SUP-IN-028,Coimbatore Parts Mfg.,India,Spare Parts,9,0.076,173,571.81,contact@cbeparts.in,+91-422-1111-2828
+SUP-IN-029,Nashik Spare Supply,India,Spare Parts,22,0.095,179,726.36,info@nashikspare.in,+91-253-2222-2929

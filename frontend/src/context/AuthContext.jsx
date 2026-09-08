@@ -16,7 +16,7 @@ export function AuthProvider({ children }) {
     if (!AUTH_ENABLED) {
       setUser({
         id: "00000000-0000-0000-0000-000000000000",
-        user_id: "admin",
+        user_id: "USR-04",
         name: "Dev User",
         email: "dev@vst.com",
         role: "Admin",

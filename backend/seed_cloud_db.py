@@ -117,13 +117,15 @@ def seed_suppliers(conn):
         records.append({
             "id": str(uuid.uuid4()),
             "supplier_id": row["Supplier_ID"],
-            "supplier_name": row.get("Supplier_Name", f"Supplier {row['Supplier_ID']}"),
+            "supplier_name": row.get("Supplier_Name", row["Supplier_ID"]),
             "origin_country": row.get("Origin_Country", ""),
             "primary_category": row.get("Primary_Category", ""),
             "base_lead_time_days": int(row.get("Base_Lead_Time_Days", 30)),
             "lead_time_volatility": float(row.get("Lead_Time_Volatility", 0.1)),
             "moq": int(row.get("Minimum_Order_Quantity", 10)),
             "unit_cost_inr": float(row.get("Unit_Cost_INR", 1000)),
+            "email": row.get("Email", None),
+            "phone": row.get("Phone", None),
             "created_at": now,
             "updated_at": now,
         })
@@ -151,7 +153,7 @@ def seed_users(conn):
         pw = str(row.get("Password", "vst2026"))
         records.append({
             "id": str(uuid.uuid4()),
-            "user_id": row.get("User_ID", f"U{len(records)+1:03d}"),
+            "user_id": row.get("User_ID", f"USR-{len(records)+1:02d}"),
             "name": row.get("Name", "User"),
             "email": row.get("Email", f"user{len(records)+1}@vst.com"),
             "password_hash": get_hash(pw),
@@ -163,9 +165,9 @@ def seed_users(conn):
 
     # Also add standard demo accounts for UI login
     demo_defaults = [
-        {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
-        {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
-        {"user_id": "cashier", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
+        {"user_id": "USR-04", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+        {"user_id": "USR-05", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
+        {"user_id": "USR-06", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
     ]
     for demo in demo_defaults:
         if not any(r["user_id"] == demo["user_id"] or r["email"] == demo["email"] for r in records):

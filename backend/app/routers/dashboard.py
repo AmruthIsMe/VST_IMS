@@ -434,7 +434,8 @@ def demand_trend(months: int = None, start_date: str = None, end_date: str = Non
             w = dt - timedelta(days=dt.weekday())
             weekly_map[w] = weekly_map.get(w, 0) + int(u or 0)
         sorted_w = sorted(weekly_map.items())
-        sorted_w = [(k, v) for k, v in sorted_w if k <= current_week_monday]
+        # Exclude the current (incomplete) week — only show fully completed weeks
+        sorted_w = [(k, v) for k, v in sorted_w if k < current_week_monday]
         if months is not None and 0 < months <= 6:
             labels = [k.strftime("%b %d") for k, _ in sorted_w]
         else:

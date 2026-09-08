@@ -1,4 +1,4 @@
 User_ID,Name,Email,Role,Status,Last_Login
-USR-001,Amit Verma,amit.verma@vst.com,Admin,Active,2025-12-28 09:30:00
-USR-002,Priya Sharma,priya.s@vst.com,Store Manager,Active,2025-12-29 08:15:00
-USR-003,Rahul Dravid,rahul.d@vst.com,Cashier,Active,2025-12-29 10:45:00
+USR-01,Amit Verma,amit.verma@vst.com,Admin,Active,2025-12-28 09:30:00
+USR-02,Priya Sharma,priya.s@vst.com,Store Manager,Active,2025-12-29 08:15:00
+USR-03,Rahul Dravid,rahul.d@vst.com,Cashier,Active,2025-12-29 10:45:00

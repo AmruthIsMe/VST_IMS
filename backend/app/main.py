@@ -28,12 +28,12 @@ def _seed_demo_users():
     db = SessionLocal()
     try:
         demo_users = [
-            {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
-            {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
-            {"user_id": "cashier", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
-            {"user_id": "USR-001", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
-            {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
-            {"user_id": "USR-003", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
+            {"user_id": "USR-04", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+            {"user_id": "USR-05", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
+            {"user_id": "USR-06", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
+            {"user_id": "USR-01", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
+            {"user_id": "USR-02", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
+            {"user_id": "USR-03", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
         ]
         hashed = "vst2026"
         now = datetime.now()

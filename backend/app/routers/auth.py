@@ -47,7 +47,7 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
     _s = _gs()
     if not getattr(_s, "AUTH_ENABLED", True):
         return {
-            "user_id": "admin",
+            "user_id": "USR-04",
             "name": "Dev User",
             "email": "dev@vst.com",
             "role": "Admin",
@@ -84,16 +84,17 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
 
 
 DEMO_ACCOUNTS = {
-    "admin": {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
-    "manager": {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
-    "cashier": {"user_id": "cashier", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
-    "usr-001": {"user_id": "USR-001", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
-    "usr-002": {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
-    "usr-003": {"user_id": "USR-003", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
-    "admin@vst.com": {"user_id": "admin", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
-    "manager@vst.com": {"user_id": "manager", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
-    "amit.verma@vst.com": {"user_id": "USR-001", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
-    "priya.s@vst.com": {"user_id": "USR-002", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
+    "usr-04": {"user_id": "USR-04", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+    "usr-05": {"user_id": "USR-05", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
+    "usr-06": {"user_id": "USR-06", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
+    "usr-01": {"user_id": "USR-01", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
+    "usr-02": {"user_id": "USR-02", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
+    "usr-03": {"user_id": "USR-03", "name": "Rahul Dravid", "email": "rahul.d@vst.com", "role": "Cashier"},
+    "admin@vst.com": {"user_id": "USR-04", "name": "Amruth", "email": "admin@vst.com", "role": "Admin"},
+    "manager@vst.com": {"user_id": "USR-05", "name": "Priya Sharma", "email": "manager@vst.com", "role": "Manager"},
+    "cashier@vst.com": {"user_id": "USR-06", "name": "Rahul Desai", "email": "cashier@vst.com", "role": "Cashier"},
+    "amit.verma@vst.com": {"user_id": "USR-01", "name": "Amit Verma", "email": "amit.verma@vst.com", "role": "Admin"},
+    "priya.s@vst.com": {"user_id": "USR-02", "name": "Priya Sharma", "email": "priya.s@vst.com", "role": "Store Manager"},
 }
 
 
