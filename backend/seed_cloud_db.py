@@ -126,6 +126,7 @@ def seed_suppliers(conn):
             "unit_cost_inr": float(row.get("Unit_Cost_INR", 1000)),
             "email": row.get("Email", None),
             "phone": row.get("Phone", None),
+            "address": row.get("Address", None),
             "created_at": now,
             "updated_at": now,
         })
@@ -220,8 +221,8 @@ def seed_sales(conn):
             "stockout_flag": bool(row.get("Stockout_Flag", False)),
         })
     
-    # Upload in chunks to avoid memory issues
-    chunk_size = 5000
+    # Upload in chunks to avoid memory issues and SQLite variable limit (999)
+    chunk_size = 500
     for i in range(0, len(records), chunk_size):
         chunk = records[i:i + chunk_size]
         pd.DataFrame(chunk).to_sql("sales", conn, if_exists="append", index=False, method="multi")
@@ -289,7 +290,7 @@ def seed_forecasts(conn):
             "created_at": now,
         })
     
-    chunk_size = 5000
+    chunk_size = 500
     for i in range(0, len(records), chunk_size):
         chunk = records[i:i + chunk_size]
         pd.DataFrame(chunk).to_sql("forecasts", conn, if_exists="append", index=False, method="multi")
