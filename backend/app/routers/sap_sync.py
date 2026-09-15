@@ -34,33 +34,56 @@ router = APIRouter(prefix="/api/sap", tags=["sap"])
 def _get_config(db: Session) -> SapConfig:
     config = db.query(SapConfig).first()
     if not config:
-        config = SapConfig()
-        db.add(config)
-        db.commit()
-        db.refresh(config)
+        try:
+            config = SapConfig()
+            db.add(config)
+            db.commit()
+            db.refresh(config)
+        except Exception:
+            # Config may already exist from another session — re-query
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            config = db.query(SapConfig).first()
+            if not config:
+                # Last resort: create via raw SQL
+                import uuid as _uuidmod
+                db.execute(sql_text(
+                    "INSERT OR IGNORE INTO sap_config (id, language, is_active) "
+                    "VALUES (:id, 'EN', 0)"
+                ), {"id": str(_uuidmod.uuid4())})
+                db.commit()
+                config = db.query(SapConfig).first()
     return config
 
 
 def _write_log(db: Session, sync_type: str, status: str,
                records: int = 0, error: str = None, detail: dict = None) -> SapSyncLog:
-    try:
-        db.rollback()
-    except Exception:
-        pass
+    """Write a sync log entry without disturbing the caller's session state."""
     import uuid as _uuidmod
-    log = SapSyncLog(
-        id=_uuidmod.uuid4(),
-        sync_type=sync_type,
-        status=status,
-        records_synced=records,
-        error_message=(error[:2000] if error else None),
-        detail_json=_detail_to_json(detail),
-        started_at=datetime.now(),
-        completed_at=datetime.now(),
-    )
-    db.add(log)
-    db.commit()
-    return log
+    log_id = _uuidmod.uuid4()
+    now = datetime.now()
+    detail_json = _detail_to_json(detail)
+    err_msg = (error[:2000] if error else None)
+    # Use raw INSERT so we never flush/rollback the caller's session
+    try:
+        db.execute(sql_text(
+            "INSERT INTO sap_sync_log (id, sync_type, status, records_synced, "
+            "error_message, detail_json, started_at, completed_at) "
+            "VALUES (:id, :sync_type, :status, :records, :error, :detail, :started, :completed)"
+        ), {
+            "id": str(log_id), "sync_type": sync_type, "status": status,
+            "records": records, "error": err_msg, "detail": detail_json,
+            "started": now, "completed": now,
+        })
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return None
 
 
 def _detail_to_json(detail: Optional[dict]) -> Optional[str]:
@@ -372,7 +395,8 @@ def _backfill_sales_to_today(db: Session) -> dict:
     by real SAP data when those weeks actually arrive.
     """
     import random
-    from statistics import mean as _mean, pstdev as _pstdev
+    import hashlib
+    from statistics import mean as _mean, stdev as _stdev
 
     now = datetime.now()
     today = date.today()
@@ -380,7 +404,7 @@ def _backfill_sales_to_today(db: Session) -> dict:
     cutoff_26w = current_monday - timedelta(weeks=26)
 
     # Per-SKU demand profile from recent history (last ~26 weeks)
-    profile: dict[str, tuple[float, float]] = {}
+    profile: dict[str, tuple[float, float, float]] = {}
     hist_rows = db.execute(sql_text(
         "SELECT sku_id, units_sold FROM sales WHERE sale_date >= :cutoff AND fulfillment_region != :sim"
     ), {"cutoff": cutoff_26w, "sim": SIM_REGION}).fetchall()
@@ -389,8 +413,14 @@ def _backfill_sales_to_today(db: Session) -> dict:
         per_sku_vals.setdefault(sku, []).append(units)
     for sku, vals in per_sku_vals.items():
         m = _mean(vals)
-        s = min(_pstdev(vals), m * 0.6) if len(vals) > 1 else m * 0.25
-        profile[sku] = (m, max(s, 0.5))
+        s = _stdev(vals) if len(vals) > 1 else m * 0.25
+        # Use actual stddev, with a minimum floor to ensure variance
+        s = max(s, m * 0.15)
+        # Per-SKU offset: deterministic random offset based on SKU hash
+        # This makes each SKU's simulated data unique
+        sku_seed = int(hashlib.md5(sku.encode()).hexdigest()[:8], 16)
+        sku_offset = (sku_seed % 100 - 50) / 100.0  # -0.50 to +0.49
+        profile[sku] = (m, s, sku_offset)
 
     if not profile:
         return {"weeks_filled": 0, "simulated_rows_inserted": 0, "simulated_rows_updated": 0}
@@ -414,25 +444,37 @@ def _backfill_sales_to_today(db: Session) -> dict:
 
     inserted = updated = 0
     max_gap_weeks = 0
-    for sku, prof in profile.items():
+    for sku, (mean_val, std_val, sku_offset) in profile.items():
         pid = pid_by_sku.get(sku)
         last = last_week_by_sku.get(sku)
         if pid is None or last is None or last > current_monday:
             continue
+
+        # Per-SKU RNG seeded with SKU + week for reproducible but unique values
+        sku_rng = random.Random(sku)
+        prev_qty = mean_val  # for week-to-week autocorrelation
 
         week = last
         sku_gap = 0
         while week < current_monday:
             week += timedelta(days=7)
             sku_gap += 1
-            full_qty = max(0, int(round(random.gauss(prof[0] * _seasonal_factor(week), prof[1]))))
+            # Seasonal factor with per-SKU variation
+            seasonal = _seasonal_factor(week)
+            target_mean = mean_val * seasonal * (1.0 + sku_offset)
+            # Week-to-week autocorrelation (AR1-like): blend previous week with target
+            blended_mean = 0.3 * target_mean + 0.7 * prev_qty
+            # Add noise with realistic stddev
+            qty = random.gauss(blended_mean, std_val)
+            qty = max(1, int(round(qty)))
+            prev_qty = qty
             db.execute(sql_text("""
                 INSERT INTO sales (id, sale_date, product_id, sku_id, units_sold,
                                    fulfillment_region, stockout_flag, created_at)
                 VALUES (:id, :sale_date, :product_id, :sku_id, :units_sold,
                         :region, FALSE, :created_at)
             """), {"id": _uuid(), "sale_date": week, "product_id": pid, "sku_id": sku,
-                   "units_sold": full_qty, "region": SIM_REGION, "created_at": now})
+                   "units_sold": qty, "region": SIM_REGION, "created_at": now})
             inserted += 1
         max_gap_weeks = max(max_gap_weeks, sku_gap)
 
@@ -623,9 +665,16 @@ def _run_full_sync(db: Session) -> dict:
             details[name] = {"status": "failed", "records_synced": 0, "error": str(e)}
             _write_log(db, name, "failed", 0, error=str(e))
             overall = "partial"
-    if config:
-        config.last_sync_at = datetime.now()
+    # Update last_sync_at via raw SQL — immune to session identity-map issues
+    try:
+        db.execute(sql_text("UPDATE sap_config SET last_sync_at = :now"),
+                   {"now": datetime.now()})
         db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
     return {"status": overall, "records_synced": total, "details": details}
 
 
@@ -673,8 +722,8 @@ def sync_sales(current_user=Depends(get_current_user)):
         result = _SYNC_MODULES["sales"](session)
         _write_log(session, "sales", result.get("status"),
                    result.get("records_synced", 0), detail=result)
-        config = _get_config(session)
-        config.last_sync_at = datetime.now()
+        session.execute(sql_text("UPDATE sap_config SET last_sync_at = :now"),
+                        {"now": datetime.now()})
         session.commit()
         return {"status": "completed", "records_synced": result.get("records_synced", 0),
                 "details": {"sales": result}}

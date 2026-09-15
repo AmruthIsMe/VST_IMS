@@ -535,6 +535,7 @@ def _load_sales_csv():
             )
             if len(df) > 0:
                 df["sale_date"] = pd.to_datetime(df["sale_date"])
+                df["is_simulated"] = df["fulfillment_region"] == "SIMULATED"
                 return df
     except Exception as e:
         logger.warning(f"Failed to load sales from database: {e}")
@@ -697,7 +698,9 @@ async def sku_explorer(
         history["week"] = history["sale_date"].dt.isocalendar().week.astype(int)
         history["year_week"] = history["sale_date"].dt.strftime("%Y-W%U")
 
-        weekly_history = history.groupby("year_week").agg(
+        # For chart history, only include real (non-simulated) data
+        real_history = history[~history["is_simulated"]]
+        weekly_history = real_history.groupby("year_week").agg(
             date=("sale_date", "last"),
             units_sold=("units_sold", "sum"),
         ).reset_index().sort_values("date")
@@ -760,6 +763,12 @@ async def sku_explorer(
                 "values": forecast_values,
                 "upper_bound": forecast_upper,
                 "lower_bound": forecast_lower,
+            },
+            "data_quality": {
+                "total_weeks": len(weekly_history),
+                "simulated_weeks": int(history["is_simulated"].sum()),
+                "real_weeks": int((~history["is_simulated"]).sum()),
+                "has_simulated_data": bool(history["is_simulated"].any()),
             },
             "stats": {
                 "avg_weekly_demand": round(float(avg_weekly), 1),
