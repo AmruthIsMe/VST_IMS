@@ -159,38 +159,47 @@ def main():
     print(f"  Last sales date: {max_date}")
 
     today = date.today()
-    if max_date and max_date >= today:
-        print("  Sales data is already up to date. Nothing to do.")
-        return
-
-    start_date = (max_date + timedelta(days=1)) if max_date else date(2026, 1, 1)
-    start_monday = _week_monday(start_date)
-    # If start_monday == max_date, the first week already has data — skip to next Monday
-    if max_date and start_monday == _week_monday(max_date):
-        start_monday += timedelta(days=7)
     end_monday = _week_monday(today)
+    # Check back at least 12 weeks to find any incomplete historical weeks
+    start_monday = max(date(2026, 1, 1), end_monday - timedelta(weeks=12))
 
-    print(f"\n  Generating sales data: {start_monday} -> {end_monday}")
-    print(f"  That's {((end_monday - start_monday).days // 7) + 1} weeks")
+    print(f"\n  Evaluating sales data integrity: {start_monday} -> {end_monday}")
 
     now = datetime.now()
     inserted = 0
     batch = []
 
     with engine.connect() as conn:
-        # Build set of dates that already have sales data
-        existing_dates = {
-            r[0] for r in conn.execute(
-                text("SELECT DISTINCT DATE(sale_date) FROM sales")
-            ).fetchall()
-        }
+        # Build map of existing dates and their total weekly units sold
+        weekly_volume = {}
+        for r in conn.execute(text("SELECT sale_date, SUM(units_sold) FROM sales GROUP BY sale_date")).fetchall():
+            d_val = r[0]
+            if isinstance(d_val, str):
+                try:
+                    d_val = date.fromisoformat(d_val[:10])
+                except ValueError:
+                    continue
+            elif isinstance(d_val, datetime):
+                d_val = d_val.date()
+            if isinstance(d_val, date):
+                w_mon = _week_monday(d_val)
+                weekly_volume[w_mon] = weekly_volume.get(w_mon, 0) + int(r[1] or 0)
+
+        # Average weekly volume target based on completed historical weeks (~6000-7000)
+        valid_vols = [v for v in weekly_volume.values() if v > 3000]
+        avg_expected_volume = (sum(valid_vols) / len(valid_vols)) if valid_vols else 6000.0
 
         week = start_monday
         while week <= end_monday:
-            if week in existing_dates:
-                print(f"    ... skipping {week} (already has data)")
+            existing_units = weekly_volume.get(week, 0)
+            if existing_units >= avg_expected_volume * 0.75:
+                print(f"    ... skipping {week} (already complete with {existing_units} units)")
                 week += timedelta(days=7)
                 continue
+            elif existing_units > 0:
+                print(f"    ... replacing incomplete week {week} (only {existing_units} units, expected ~{int(avg_expected_volume)})")
+                conn.execute(text("DELETE FROM sales WHERE sale_date = :w"), {"w": week})
+                conn.commit()
             for sku, prof in profiles.items():
                 pid = pid_by_sku.get(sku)
                 if not pid:

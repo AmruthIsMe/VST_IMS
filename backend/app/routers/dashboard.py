@@ -438,13 +438,13 @@ def demand_trend(months: int = None, start_date: str = None, end_date: str = Non
         # On other days the backfill/sync has already populated it.
         if today.weekday() == 0:  # Monday
             sorted_w = [(k, v) for k, v in sorted_w if k < current_week_monday]
-        # Exclude partial weeks (value < 50% of median) to avoid dips from incomplete data
+        # Exclude partial weeks (value < 75% of median) to avoid dips from incomplete data
         if sorted_w:
             import statistics
             all_vals = [v for _, v in sorted_w]
             median_v = statistics.median(all_vals) if all_vals else 0
             if median_v > 0:
-                sorted_w = [(k, v) for k, v in sorted_w if v >= median_v * 0.5]
+                sorted_w = [(k, v) for k, v in sorted_w if v >= median_v * 0.75]
         if months is not None and 0 < months <= 6:
             labels = [k.strftime("%b %d") for k, _ in sorted_w]
         else:
