@@ -15,6 +15,8 @@ import Settings from './pages/Settings';
 import SapSync from './pages/SapSync';
 import Forecasting from './pages/Forecasting';
 import Genie from './pages/Genie';
+import ServerWakeScreen from './components/ServerWakeScreen';
+import { useServerWake } from './hooks/useServerWake';
 import './App.css';
 
 const queryClient = new QueryClient({
@@ -60,11 +62,17 @@ function AppContent() {
 }
 
 export default function App() {
+  const { isWaking, serverReady } = useServerWake();
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AppProvider>
           <BrowserRouter>
+            {/* Show animated wake screen on top during cold-starts.
+                The app mounts in the background so all providers and
+                React Query are ready the moment the server responds. */}
+            {isWaking && <ServerWakeScreen ready={serverReady} />}
             <AppContent />
           </BrowserRouter>
         </AppProvider>
